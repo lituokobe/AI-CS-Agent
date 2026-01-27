@@ -649,7 +649,6 @@ class IntentionNode:
 
         # A correct flow should have a defined next_state at this time
         if next_state == "others":
-            print(next_state)
             e_m = (f"会话{thread_id}，节点{self.config.node_id}-{self.config.node_name}，"
                    f"用户没有输入或意图无法判断。"
                    f"请在本节点或全局配置并设置以应对此种情况。")
@@ -701,17 +700,16 @@ class IntentionNode:
             })
 
         if self.config.enable_logging:
-            logger_chatflow.info(
-                "本节点最新log：%s",
-                "; ".join(
-                    f"{k}:{(v[:12] + '...' if k == 'content' and isinstance(v, str) and len(v) > 12 else v)}"
-                    for k, v in updated_logs[-1].items()
-                )
-            )
-            node_ending_logging(self.config, thread_id)
+            # logger_chatflow.info(
+            #     "本节点最新log：%s",
+            #     "; ".join(
+            #         f"{k}:{(v[:12] + '...' if k == 'content' and isinstance(v, str) and len(v) > 12 else v)}"
+            #         for k, v in updated_logs[-1].items()
+            #     )
+            # )
+            node_ending_logging(self.config, thread_id, updated_logs[-1].get("time_cost", 0.0) if updated_logs else 0.0)
 
         return {
-            "messages": messages,
             "dialog_state": next_state,
             "logs":updated_logs,
             "metadata": state["metadata"]

@@ -11,9 +11,8 @@ agent_data = {
   "llm_background_info": "你现在正在沟通的都是可能会有装修需求的人，请尽量引导客户加微信",
 
   "vector_db_url": "http://127.0.0.1:19530",
-  "collection_name" : "home_reno456"
+  "collection_name" : "home_reno123"
 }
-
 chatflow_design = [
   {
     "sort" : 1,
@@ -699,7 +698,6 @@ chatflow_design = [
     }
   }
 ]
-
 global_configs = [
   {
     "context_type": 1, # 1客户无应答模块 2ai未识别模块 3噪音处理模块
@@ -792,7 +790,6 @@ global_configs = [
     "enable_logging": True
   }
 ]
-
 intentions = [
   {
     "intention_id": "I001",
@@ -984,7 +981,6 @@ intentions = [
     "llm_description": ["用户表示自己很可爱"]
   }
 ]
-
 knowledge = [
   {
     "intention_id": "K001",
@@ -1215,7 +1211,6 @@ knowledge = [
     "enable_logging": True
   }
 ]
-
 knowledge_main_flow = [
   {
     "main_flow_id" : "MF_wechat",

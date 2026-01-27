@@ -14,6 +14,7 @@ class LaunchMilvus:
         self.collection_name = collection_name
         self.merged_data = (intentions or []) + (knowledge or [])
         self._ensure_collection_ready(self.merged_data)
+        self.dimension:int = 1024 # dimension from the embedding model: BGE, Qwen0.6B - 1024; Qwen4B - 2560
 
     def _generate_phrase_id(self, intention_id: str, phrase: str) -> int:
         """Generate a deterministic ID for a phrase."""
@@ -43,7 +44,7 @@ class LaunchMilvus:
         """Create the Milvus collection schema."""
         self.client.create_collection(
             collection_name=self.collection_name,
-            dimension = 1024, #This value has to be 1024 as it is the dimension of Qwen Embedding
+            dimension = self.dimension,
             metric_type="COSINE",
             auto_id=False,  # We manage IDs by ourselves
             primary_field="id",
@@ -130,8 +131,8 @@ class LaunchMilvus:
                     embedding = embed_query(phrase)
                     if hasattr(embedding, 'tolist'):#convert array-like objects into standard lists, required by Milvus
                         embedding = embedding.tolist()
-                    if len(embedding)!=1024:
-                        e_m = f"向量数据库collection：{self.collection_name}向量为度应为1024，目前为{len(embedding)}"
+                    if len(embedding)!=self.dimension:
+                        e_m = f"向量数据库collection：{self.collection_name}向量为度应为{self.dimension}，目前为{len(embedding)}"
                         logger_chatflow.error(e_m)
                         raise ValueError(e_m)
 
@@ -190,6 +191,7 @@ class LaunchMilvusAsync:
         self._cache_lock = threading.RLock()
         self._max_cache_size = 10000
         self.limit = 10000 # limit for collection client query
+        self.dimension = 1024 # dimension from the embedding model: BGE, Qwen0.6B - 1024; Qwen4B - 2560
 
     def _generate_phrase_id(self, intention_id: str, phrase: str) -> int:
         """Generate a deterministic ID for a phrase."""
@@ -203,11 +205,18 @@ class LaunchMilvusAsync:
         logger_chatflow.info(f"开始处理向量数据库collection：{self.collection_name}")
 
         # if collection doesn't exist, create it.
-        has_collection = await self.client.has_collection(self.collection_name)  # AWAIT
+        try:
+            has_collection = await self.client.has_collection(self.collection_name, timeout=20.0)  # AWAIT
+        except asyncio.TimeoutError:
+            logger_chatflow.error(f"向量数据库collection：{self.collection_name} 连接超时 (20秒)")
+        except Exception as e:
+            logger_chatflow.error(f"查询向量数据库collection：{self.collection_name} 是否存在失败: {str(e)}")
+            return None
+
         if not has_collection:
             await self._create_collection()
             await self._create_hnsw_index()
-            logger_chatflow.info(f"已创建新的向量数据库collection：{self.collection_name}和HNSW index")
+            logger_chatflow.info(f"已创建新的向量数据库collection：{self.collection_name}和其HNSW index")
             try:
                 await self.client.load_collection(self.collection_name, timeout=30)
                 logger_chatflow.info(f"向量数据库collection：{self.collection_name}已加载到内存")
@@ -239,7 +248,7 @@ class LaunchMilvusAsync:
         """Create the Milvus collection schema."""
         await self.client.create_collection(
             collection_name=self.collection_name,
-            dimension = 1024, #Qwen Embedding 0.6B dimension
+            dimension = self.dimension,
             metric_type="COSINE",
             auto_id=False,  # We manage IDs by ourselves
             primary_field="id",
@@ -276,7 +285,7 @@ class LaunchMilvusAsync:
                 collection_name=self.collection_name,
                 index_params=index_params
             )
-            logger_chatflow.info(f"已创建向量数据库collection：{self.collection_name} HNSW index")
+            logger_chatflow.info(f"已创建向量数据库collection：{self.collection_name}的HNSW index")
         except MilvusException as e:
             logger_chatflow.info(f"创建向量数据库collection：{self.collection_name} HNSW index时发生错误：{str(e)}")
             raise RuntimeError(str(e))
@@ -331,7 +340,7 @@ class LaunchMilvusAsync:
                     filter="",
                     output_fields=["id"],
                     limit=self.limit,
-                    offset=0
+                    offset=offset
                 )
                 if not results:
                     break
@@ -504,10 +513,11 @@ class LaunchMilvusAsync:
                             for key in keys_to_remove:
                                 del self.embedding_cache[key]
 
-                        embedding = embed_query(phrase_text)
+                        # embedding = embed_query(phrase_text)
+                        embedding = await asyncio.to_thread(embed_query, phrase_text)
                         if hasattr(embedding, 'tolist'):
                             embedding = embedding.tolist()
-                        if len(embedding) != 1024:
+                        if len(embedding) != self.dimension:
                             logger_chatflow.error(f"向量数据库collection：{self.collection_name}向量维度错误: {len(embedding)}，跳过：{phrase_text[:50]}...")
                             return None
                         self.embedding_cache[cache_key] = embedding

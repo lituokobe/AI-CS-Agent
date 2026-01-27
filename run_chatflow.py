@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import redis.asyncio as redis_async
 from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.redis import AsyncRedisSaver
@@ -7,9 +8,9 @@ from agent_builders.chatflow_builder import build_chatflow
 from config.config_setup import ChatFlowConfig
 from config.db_setting import DBSetting
 # from data.simulated_data_lt import agent_data, knowledge, knowledge_main_flow, chatflow_design, global_configs, intentions
-# from data.simulated_data_lt_simplified import agent_data, knowledge, knowledge_main_flow, chatflow_design, global_configs, intentions
+from data.simulated_data_lt_simplified import agent_data, knowledge, knowledge_main_flow, chatflow_design, global_configs, intentions
 # from data.simulated_data import agent_data, knowledge, knowledge_main_flow, chatflow_design, global_configs, intentions
-from data.simulated_data_xyp20251222 import agent_data, knowledge, knowledge_main_flow, chatflow_design, global_configs, intentions
+# from data.simulated_data_xyp20251222 import agent_data, knowledge, knowledge_main_flow, chatflow_design, global_configs, intentions
 from functionals.log_utils import logger_chatflow
 
 # The function to run the chatflow
@@ -35,7 +36,8 @@ async def main(call_id: str, fresh_start: bool = True):
     # TODO: Setup redis_client
     settings = DBSetting()
     redis_client = redis_async.Redis( #异步Redis
-        host=settings.REDIS_SERVER,
+        #get redis server url from env (for Docker) first, if not, get it from settings
+        host=os.getenv("REDIS_SERVER", settings.REDIS_SERVER),
         password=settings.REDIS_PASSWORD,
         port=int(settings.REDIS_PORT),
         db=settings.REDIS_DB, # Redis Search requires index be built on database 0

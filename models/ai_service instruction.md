@@ -13,8 +13,8 @@ The body is (using default data):
 ```
 4. To check weather the model is active (model status): GET `http://127.0.0.1:5002/model/status?model_id=my_test_model`
 5. Test the keyword matching service with 
-  - `POST http://127.0.0.1:5002/keyword_match`
-  - `POST http://192.168.0.143:5002/keyword_match`
+  - `POST http://127.0.0.1:5001/gateway/keyword_match`
+  - `POST http://192.168.0.143:5001/gateway/keyword_match`
 The body is (using default data): 
 ```
 {"keywords": ["^你好"], "sentence": "你好啊"}

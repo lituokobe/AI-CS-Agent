@@ -96,6 +96,7 @@ class IntegratedSemanticMatcher:
         result = await matcher.find_most_similar(user_input)
         if result:
             tid, tname, cont, score = result
+            print(f"NLP预匹配，最匹配短语: {cont}, 问法相似度: {float(score):.3f}")
             if score > self.nlp_threshold:
                 return tid, tname, cont, score, label
         return None
@@ -139,6 +140,10 @@ class IntegratedSemanticMatcher:
         except asyncio.TimeoutError:
             logger_chatflow.warning("语义匹配超时（3秒）")
             intention_result = knowledge_result = DEFAULT_RESULT
+
+        print(f"NLP预匹配\n"
+              f"意图库最匹配短语: {intention_result[2]}, 问法相似度: {float(intention_result[3]):.3f}\n"
+              f"知识库最匹配短语: {knowledge_result[2]}, 问法相似度: {float(knowledge_result[3]):.3f}")
 
         score_i = intention_result[3] if intention_result else -1.0
         score_k = knowledge_result[3] if knowledge_result else -1.0

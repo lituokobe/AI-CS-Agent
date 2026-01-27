@@ -103,7 +103,7 @@ class ReplyNode:
 
         # Setup log info and reply message
         if reply_content:
-            updated_messages = messages + [AIMessage(content=reply_content)]
+            current_message = AIMessage(content=reply_content)
             updated_logs = logs + [{
                 **previous_log,
                 "role": "assistant",
@@ -243,7 +243,7 @@ class ReplyNode:
             }]
         else:
             # When there is no default reply, we only update logs, we don't create any metadata
-            updated_messages = messages + [AIMessage(content="")]
+            current_message = AIMessage(content="")
             updated_logs = logs + [{
                 **previous_log,
                 "role": "assistant",
@@ -268,16 +268,16 @@ class ReplyNode:
 
         # Log information
         if self.config.enable_logging:
-            logger_chatflow.info(
-                "本节点最新log：%s",
-                "; ".join(
-                    f"{k}:{(v[:12] + '...' if k == 'content' and isinstance(v, str) and len(v) > 12 else v)}"
-                    for k, v in updated_logs[-1].items()
-                )
-            )
+            # logger_chatflow.info(
+            #     "本节点最新log：%s",
+            #     "; ".join(
+            #         f"{k}:{(v[:12] + '...' if k == 'content' and isinstance(v, str) and len(v) > 12 else v)}"
+            #         for k, v in updated_logs[-1].items()
+            #     )
+            # )
             node_ending_logging(self.config, thread_id)
         return {
-            "messages": updated_messages,
+            "messages": current_message,
             "dialog_state": self.next_node_name,
             "logs": updated_logs,
             "metadata":updated_metadata
@@ -438,7 +438,7 @@ class ReplyNodeKGF:
 
         # Setup log info and reply message
         if reply_content:
-            updated_messages = messages + [AIMessage(content=reply_content)]
+            current_message = AIMessage(content=reply_content)
             updated_logs = logs + [{
                 **previous_log,
                 "role": "assistant",
@@ -576,7 +576,7 @@ class ReplyNodeKGF:
             }]
         else:
             # When there is no default reply, we only update logs, we don't create any metadata
-            updated_messages = messages + [AIMessage(content="")]
+            current_message = AIMessage(content="")
 
             updated_logs = logs + [{
                 **previous_log,
@@ -595,16 +595,16 @@ class ReplyNodeKGF:
             updated_metadata = copy.deepcopy(metadata)
         # Log information
         if self.config.enable_logging:
-            logger_chatflow.info(
-                "本节点最新log：%s",
-                "; ".join(
-                    f"{k}:{(v[:12] + '...' if k == 'content' and isinstance(v, str) and len(v) > 12 else v)}"
-                    for k, v in updated_logs[-1].items()
-                )
-            )
+            # logger_chatflow.info(
+            #     "本节点最新log：%s",
+            #     "; ".join(
+            #         f"{k}:{(v[:12] + '...' if k == 'content' and isinstance(v, str) and len(v) > 12 else v)}"
+            #         for k, v in updated_logs[-1].items()
+            #     )
+            # )
             node_ending_logging(self.config, thread_id)
         return {
-            "messages": updated_messages,
+            "messages": current_message,
             "dialog_state": next_state,
             "logs": updated_logs,
             "metadata": updated_metadata
@@ -756,7 +756,7 @@ class ReplyNodeKT:
 
         # Setup log info and reply message
         if reply_content:
-            updated_messages = messages + [AIMessage(content=reply_content)]
+            current_message = AIMessage(content=reply_content)
             updated_logs = logs + [{
                 **previous_log,
                 "role": "assistant",
@@ -893,7 +893,7 @@ class ReplyNodeKT:
             }]
         else:
             # When there is no default reply, we only update logs, we don't create any metadata
-            updated_messages = messages + [AIMessage(content="")]
+            current_message = AIMessage(content="")
 
             updated_logs = logs + [{
                 **previous_log,
@@ -913,16 +913,16 @@ class ReplyNodeKT:
         # Log information
         if self.config.enable_logging:
             if updated_logs[-1]:
-                logger_chatflow.info(
-                    "本节点最新log：%s",
-                    "; ".join(
-                        f"{k}:{(v[:12] + '...' if k == 'content' and isinstance(v, str) and len(v) > 12 else v)}"
-                        for k, v in updated_logs[-1].items()
-                    )
-                )
+                # logger_chatflow.info(
+                #     "本节点最新log：%s",
+                #     "; ".join(
+                #         f"{k}:{(v[:12] + '...' if k == 'content' and isinstance(v, str) and len(v) > 12 else v)}"
+                #         for k, v in updated_logs[-1].items()
+                #     )
+                # )
                 node_ending_logging(self.config, thread_id)
         return {
-            "messages": updated_messages,
+            "messages": current_message,
             "dialog_state": next_state,
             "logs": updated_logs,
             "metadata": updated_metadata

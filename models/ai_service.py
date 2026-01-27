@@ -33,7 +33,6 @@ from data.simulated_data_lt_simplified import (
     intentions,
 )
 from functionals.log_utils import logger_chatflow
-from functionals.matchers import KeywordMatcher
 from models.async_notification_manager import AsyncNotificationManager
 from models.persistence_manager import ModelPersistenceManager
 
@@ -185,8 +184,10 @@ class DynamicModelManager:
                 # 重新初始化模型
                 chatflow_config = self._build_chatflow_config(config_data.get('config', {}))
 
-                redis_client = redis_async.Redis(  # 异步Redis
-                    host=settings.REDIS_SERVER,
+                redis_client = redis_async.Redis(
+                    # 异步Redis
+                    # get redis server url from env (for Docker) first, if not, get it from settings
+                    host=os.getenv("REDIS_SERVER", settings.REDIS_SERVER),
                     password=settings.REDIS_PASSWORD,
                     port=int(settings.REDIS_PORT),
                     db=settings.REDIS_DB,  # Redis Search requires index be built on database 0
@@ -1118,43 +1119,6 @@ def get_persistence_status():
             'success': False,
             'message': f'获取持久化状态失败: {str(e)}'
         }), 500
-
-@app.route("/keyword_match", methods=["POST"])
-async def match_keywords():
-    try:
-        # Parse JSON body
-        data = await request.get_json(silent=True)
-        if not data:
-            return jsonify({"error": "无效JSON"}), 400
-
-        keywords = data.get("keywords")
-        sentence = data.get("sentence")
-
-        # Input validation
-        if not isinstance(keywords, list):
-            return jsonify({"error": "关键词输入应为列表"}), 400
-        if not keywords:
-            return jsonify({"matched": False})
-        if not isinstance(sentence, str) or not sentence.strip():
-            return jsonify({"matched": False})
-
-        # Build intention for your matcher
-        intention_list = [
-            {
-                "intention_id": "keyword_matching_service",
-                "intention_name": "关键词匹配服务",
-                "keywords": keywords
-            }
-        ]
-
-        matcher = KeywordMatcher(intention_list)
-        result = matcher.analyze_sentence(sentence)
-
-        return jsonify({"matched": bool(result)})
-
-    except Exception as e:
-        logger_chatflow.error(f"关键词匹配错误: {str(e)}")
-        return jsonify({"error": "Internal matching error"}), 500
 
 # TODO: Start the service
 def start_dynamic_service(port=5002):

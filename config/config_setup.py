@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 from typing import Any, Literal
 from pydantic import BaseModel, Field
@@ -98,8 +99,13 @@ class ChatFlowConfig(BaseModel):
             llm_context_rounds=int(agent_data.get("llm_context_rounds")),
             llm_role_description=str(agent_data.get("llm_role_description")),
             llm_background_info=str(agent_data.get("llm_background_info")),
-            # 向量数据库
-            vector_db_url=str(agent_data.get("vector_db_url")),
+            # Milvus - vector database; get the url from env first (for docker), if not, get it from agent_data
+            vector_db_url=str(
+                os.getenv(
+                    "MILVUS_URL",
+                    agent_data.get("vector_db_url")
+                )
+            ),
             collection_name=str(agent_data.get("collection_name"))
         )
 
@@ -170,16 +176,17 @@ class ChatFlowConfig(BaseModel):
                 raise TypeError(e_m)
             sort = int(flow.get("sort"))
             main_flow_id = flow.get("main_flow_id")
+            main_flow_name = flow.get("main_flow_name", "")
             main_flow_content = flow.get("main_flow_content", {})
             base_nodes = main_flow_content.get("base_nodes")
             starting_node_id = main_flow_content.get("starting_node_id")
 
             if not isinstance(main_flow_id, str) or not main_flow_id:
-                e_m = f"主流程{main_flow_id}id应为非空字符串"
+                e_m = f"主流程-{main_flow_name}id应为非空字符串"
                 logger_chatflow.error(e_m)
                 raise TypeError(e_m)
             if not isinstance(starting_node_id, str) or not starting_node_id:
-                e_m = f"主流程{main_flow_id}的初始节点id应为非空字符串"
+                e_m = f"主流程-{main_flow_name}-{main_flow_id}的初始节点id应为非空字符串"
                 logger_chatflow.error(e_m)
                 raise TypeError(e_m)
             if not isinstance(base_nodes,
@@ -211,14 +218,15 @@ class ChatFlowConfig(BaseModel):
                     raise TypeError(e_m)
                 main_flow_id = flow.get("main_flow_id")
                 main_flow_content = flow.get("main_flow_content", {})
+                main_flow_name = flow.get("main_flow_name","")
                 starting_node_id = main_flow_content.get("starting_node_id")
 
                 if not isinstance(main_flow_id, str) or not main_flow_id:
-                    e_m = "知识库主流程id应为非空字符串"
+                    e_m = f"知识库主流程-{main_flow_name}id应为非空字符串"
                     logger_chatflow.error(e_m)
                     raise TypeError(e_m)
                 if not isinstance(starting_node_id, str) or not starting_node_id:
-                    e_m = "知识库主流程的初始节点id应为非空字符串"
+                    e_m = f"知识库主流程-{main_flow_name}-{main_flow_id}初始节点id应为非空字符串"
                     logger_chatflow.error(e_m)
                     raise TypeError(e_m)
                 starting_node_lookup[main_flow_id] = starting_node_id
@@ -229,13 +237,13 @@ class ChatFlowConfig(BaseModel):
         # This node is special because it's triggered first without user's input.
         starting_main_flow_id = min(sort_lookup, key=sort_lookup.get) if sort_lookup else None
         if not isinstance(starting_main_flow_id, str):
-            e_m = "初始主流程ID必须为字符串"
+            e_m = f"初始主流程ID必须为字符串"
             logger_chatflow.error(e_m)
             raise TypeError(e_m)
 
         starting_node_id = starting_node_lookup.get(starting_main_flow_id, None)
         if not isinstance(starting_node_id, str):
-            e_m = "初始节点ID必须为字符串"
+            e_m = f"项目首个流程的初始节点ID必须为字符串"
             logger_chatflow.error(e_m)
             raise TypeError(e_m)
 

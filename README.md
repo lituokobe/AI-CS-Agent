@@ -1,133 +1,196 @@
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-# Generator for AI Customer Service Agent
-This a GUI software that allows business managers to freely design customer service 
-agents with pre-defined conversation flows, using intuitive nodes and edges.
-The agent's engagement with customers is powered by large language models (LLMs) and 
-natural language processing (NLP).
+# AI Customer Service Agent Generator
 
-The conversation flows behind the agent are composed with:
-- **Base nodes** that can send preconfigured replies and identify intentions from customer replies in real time.
-- **Transfer nodes** that respond with pre-defined replies as well and transfer the conversation to another conversation flow.
-- **Edges** that connect nodes and define conditional logic.  
+A highly configurable **AI-powered customer service agent engine** with a visual workflow designer.
+It allows business users to quickly build LLM-powered customer service agents using node-based
+conversation flows and conditional logic.
 
-A well-designed agent can effectively handle customer service tasks and delivery business-promotion objectives. 
-Below is an example of the GUI showing a sample conversation flow with nodes and edges:  
+The system can identify user intent in real time and generate accurate responses, making it suitable for:
+- Customer support
+- Business promotion
+- Telephone sales and outreach
+- Intelligent assistants
 
-![example_UI](./example_UI.jpg)
+<img src="./images/ui_example.jpg" alt="workflow UI example" style="width:600px; display:block; margin:auto;">
 
-## 1. Features
+---
 
--   **Custom Conversation Flow**: Freely orchestrate dialogue logic
-    using base nodes, transfer nodes, and conditional edges
-    based on **business needs** and **previous experiences of customer engagements**.
--   **Multi-strategy Intention Detection**: Leverage keyword matching,
-    semantic similarity based on NLP, and/or LLM-based AI reasoning. 
-    You can choose to use one or multiple methods for detecting customer intentions.
--   **Custom Intention Library**: Define regular intentions to detect from customer replies and
-    use them to build base nodes and add edges accordingly to design conversation flows.
--   **Custom Knowledge Base**: For **regular questions** that customers may ask
-    at any point, create knowledge intentions with a **RAG approach**. You
-    can also configure whether a node prioritizes its local regular intentions or
-    the global knowledge intentions.
--   **Real-time Response**: Low-latency dialog processing suitable for
-    telephone environments.
--   **Highly Configurable**: Choose to ignore certain knowledge intentions in selected nodes;
-    set a maximum number for matching a knowledge intentions; set up conversation flows for
-    knowledge base; use variables in the response, etc.
--   **High Concurrency Supported**: Multiple users with different thread ids can interact with the agent without conflicts.
+## ✨ Key Features
 
-## 2. Technical Architecture
+- **Visual Conversation Flow Design**  
+  Design dialogue logic using intuitive **nodes** and **conditional edges** to match real business scenarios.
 
-### 2.1 Core Models
+- **Multiple Intent Recognition Strategies**  
+  Combine keyword matching, semantic similarity (NLP), and LLM reasoning for accurate intent detection.
 
-| Component | Model Used                                                                                                                                                                                                                                 | Description                                                |
-|-----------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------|
-| **Embedding Model** | [Qwen3-Embedding-0.6B](https://huggingface.co/Qwen/Qwen3-Embedding-0.6B)                                                                                                                                                                   | Used for semantic vectorization and similarity calculation |
-| **Large Language Model** | [Qwen-Plus](https://modelstudio.console.alibabacloud.com/?tab=doc#/doc/?type=model&url=2840914_2&modelId=qwen-plus), [DeepSeek-Chat](https://huggingface.co/deepseek-ai/DeepSeek-V2-Chat), or [GLM 4.6](https://huggingface.co/zai-org/GLM-4.6) | Used for complex intent recognition and structured output  |
+- **Dual Intent System**  
+  Support both **node-specific intent libraries** and a **global knowledge base**.
 
-### 2.2 Tech Stacks
+- **Low-Latency Real-Time Response**  
+  Optimized for telephone and real-time conversation environments.
 
--   **Agent Framework**: [LangGraph and LangChain](https://www.langchain.com/langgraph)
--   **Memory/Storage Management**: [Redis](https://redis.io/)
--   **Vector Database**: [Milvus Standalone](https://milvus.io/)
+- **Flexible Priority Strategies**  
+  Resolve intent conflicts using configurable priority policies.
 
-### 2.3 Environment Requirements
+- **High Concurrency Support**  
+  Multiple users and sessions can interact with the system simultaneously without conflict.
 
--   **Python**: 3.8 or above (3.11 recommended)
--   **Dependencies**: See `requirements.txt`
+## 🧠 Conversation Model
 
-## 3. Quick Start
+The agent’s conversation logic is composed of:
 
-### 3.1 Environment Setup
+- **Base Nodes**  
+  Send preconfigured replies and detect customer intentions in real time.
 
-``` bash
-# Clone the project
-git clone https://github.com/lituokobe/event-marketing-agent
+- **Transfer Nodes**  
+  Reply to the user and transfer the conversation to another conversation flow.
+
+- **Edges (Conditional Transitions)**  
+  Define how conversations move between nodes based on detected intentions.
+
+A well-designed flow enables the agent to efficiently complete customer service tasks and business objectives.
+
+---
+
+## 🔍 Intent Recognition Mechanism
+
+Each intent can be configured with one or more of the following detection strategies:
+
+### 1. Keyword Matching (Always Enabled)
+- Based on the **Aho–Corasick algorithm**
+- Supports regular expressions
+- Extremely fast and suitable for explicit, simple intents
+
+### 2. NLP Semantic Similarity (Optional)
+- Matches user input with predefined utterances using vector similarity
+- Configurable similarity threshold (default: `0.8`)
+- Higher thresholds increase precision but reduce recall
+
+### 3. LLM-Based Reasoning (Optional)
+- Uses large language models to understand complex or ambiguous contexts
+- Configurable minimum trigger length (default: `3` characters)
+- Supports configurable conversation context depth for better accuracy
+
+---
+
+## 🗂️ Intent System Design
+
+### 1. Node-Specific Intent Library
+- Intents used only within a specific node
+- Designed for targeted decision-making  
+  (e.g. determining whether a user is interested or not in a commercial event)
+
+### 2. Global Knowledge Base
+- Intents that may be triggered at **any point** in the conversation
+- Suitable for general or out-of-flow questions such as:
+  - “What is your name?”
+  - “Where is the event located?”
+
+### 3. Intent Priority Strategy
+When both node-specific intents and global knowledge intents are evaluated, one of the following strategies can be selected:
+
+- **Node Intent First**
+- **Knowledge Base First**
+- **Smart Priority (Automatic)**
+
+### 4. Flexible Controls
+- Disable specific knowledge intents for selected nodes
+- Configure maximum match count for each knowledge intent (default: unlimited)
+
+---
+
+## 🏗️ System Architecture
+
+### Core Models
+
+| Component            | Model                                                                                                                                                                                                                  | Description                                   |
+|----------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------|
+| **Embedding Model**  | [BGE-Large-Zh-v1.5](https://huggingface.co/BAAI/bge-large-zh-v1.5)                                                                                                                                                     | Semantic embedding and similarity computation |
+| **LLM (API-based)**  | - [Qwen-max](https://qwen-ai.chat/models/qwen3-max/) (most accurate)<br/>- [Qwen-flash](https://qwen-ai.chat/models/qwen-flash/) (fastest)<br/>- [Qwen-turbo](https://qwen-ai.chat/models/qwen-turbo/) (most balanced) | Intent classifying with complex reasoning     |
+
+### Core Components
+
+| Module                | Technology                                                                                                                                                               | Description                       |
+|-----------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------|
+| **Workflow Engine**   | [LangGraph + LangChain](https://www.langchain.com/langgraph)                                                                                                             | Conversation flow orchestration   |
+| **Vector Store**      | [Milvus Standalone](https://milvus.io/)                                                                                                                                  | High-performance vector retrieval |
+| **State Storage**     | [Redis](https://redis.io/)                                                                                                                                               | Session and state management      |
+| **API Services**      | [Flask](https://flask.palletsprojects.com/en/stable/) + [Quart](https://quart.palletsprojects.com/en/latest/) + [Hypercorn](https://hypercorn.readthedocs.io/en/latest/) | RESTful API layer                 |
+| **Deployment**        | [Docker + Docker Compose](https://www.docker.com/)                                                                                                                       | Containerized deployment          |
+
+---
+
+## 🚀 Quick Start
+
+### 1. Environment Requirements
+- **Python**: 3.8+ (Recommended: 3.11)
+- **Dependencies**: See `requirements.txt`
+
+```bash
+# Clone repository
+git clone https://github.com/lituokobe/AI-CS-Agent/
 cd customer-service-bot
 
 # Install dependencies
 pip install -r requirements.txt
 ```
 
-### 3.2 API Key Configuration
+### 2. API Key Configuration
 
-- Register an [Alibaba Cloud](https://www.alibabacloud.com/) account and obtain an API Key for Qwen-Plus, and/or
-- Register a [DeepSeek](https://platform.deepseek.com/) account and obtain an API Key for DeepSeek-Chat, and/or
-- Register a [BigModel](https://bigmodel.cn//) account and obtain an API Key for GLM 4.6.
-- Fill in your preferred API keys in `models.models.py`.
+1. Register for an Alibaba Cloud Bailian account
+2. Rename `.env.example` to `.env`
+3. Configure your API key:
 
-``` bash
-ALI_API_KEY=your_aliyun_api_key
-DEEPSEEK_API_KEY=your_deepseek_api_key
-GLM_API_KEY=your_glm_api_key
+```bash
+ALI_API_KEY=your_ali_api_key
 ```
 
-### 3.4 Technical setup
-- Prepare Milvus Standalone and input the service's URL to `data.simulated_data.py` - `agent_data` - `"vector_db_url"`
-- Deploy Qwen3-Embedding-0.6B service and input the service's URL to `functionals.embedding_functions.py` - `EMBED_SERVICE_URL`
-- You may choose to ignore the above 2 steps if you don't use semantic similarity matching. Simply set `data.simulated_data.py` - `agent_data` - `"enable_nlp"` to 0
-- Prepare Redis and input the service's information to `config.db_setting.py` - `DBSetting`
+### 3. Project Data Structure
 
-### 3.4 Project Data
+Conversation logic is fully defined via the GUI at runtime.
+Sample test data is provided in the `./data/` directory.
 
-The design and configuration are supposed to be setup by the business managers in the GUI, and act as the data to launch the agent.
-In `data.simulated_data.py`, there are examples:
+Example: `simulated_data.py`
 
--   `agent_data` --- High level configuration of the agent, deciding which features to enable and services to use.
--   `chatflow_design` --- Conversation flow configuration including
-    main flow, nodes, and conditional edges. Users can fully customize
-    this to build different customer-service bots
--   `global_configs` --- Global configurations on the agent when there are no matching intentions or customers have no replies.
--   `intentions` --- Library of regular intentions. Nodes will use specific intentions according to project needs
--   `knowledge` --- Knowledge intentions for answering regular customer questions, this is optional.
--   `knowledge_main_flow` --- Conversation flow for knowledge intentions, this is optional as well.
+- `agent_data` – Agent-level configuration (NLP, LLM, priority strategies)
+- `chatflow_design` – Conversation flow definitions
+- `intentions` – Node intent library definitions
+- `knowledge` – Global knowledge base intents
+- `knowledge_main_flow` – Conversation flows triggered by knowledge hits
+- `global_configs` – Fallback and default behaviors
 
-### 3.5 Run a Test
+### 4. Run a Test
 
-``` bash
+```bash
 python run_chatflow.py
 ```
 
-## 4. How It Works
+---
 
-### 4.1 When LLM Mode Is Enabled
+## 📡 API Documentation
 
--   The system uses the LLM for intention identification.
--   You can set an LLM confidence threshold. When the LLM score is below
-    this threshold (e.g., 3), the system falls back to the two non-LLM
-    methods below.
+### Gateway Layer (Port: 5001)
+Implemented in `ai_gateway_service.py`
 
-### 4.2 When LLM Mode Is Disabled
+- `GET /gateway/health` – Health check
+- `POST /gateway/model/start` – Start a conversation model
+- `POST /gateway/conversation` – Chat with the agent
 
-#### Layer 1: Keyword Retrieval
+### Model Service Layer (Port: 5002)
+Implemented in `ai_service.py`
 
--   Uses an AC Automaton to quickly match predefined keywords (regular expressions supported).
--   When keywords match, the corresponding intent is returned
-    immediately.
+- `GET /health`
+- `POST /model/initialize`
+- `POST /model/extend`
+- `POST /model/generate`
+- `POST /model/destroy`
+- `GET /model/status`
+- `POST /model/cleanup`
+- `POST /model/persistence/backup`
+- `GET /model/persistence/status`
 
-#### Layer 2: Question-pattern Understanding
+---
 
--   Retrieves the most similar question pattern using vector similarity.
--   Cosine similarity threshold: ≥ 0.8
--   Uses the vector database (Milvus) for efficient retrieval.
+## 📄 License
 
+This project is licensed under the **Apache License 2.0**.

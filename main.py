@@ -5,12 +5,10 @@ def start_gateway_service():
     from models.ai_gateway_service import start_gateway_service
     start_gateway_service()
 
-
 def start_ai_service():
     """启动AI服务"""
     from models.ai_service import start_dynamic_service
     start_dynamic_service()
-
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='启动AI外呼系统服务')

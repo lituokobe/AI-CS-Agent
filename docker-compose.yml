@@ -1,26 +1,42 @@
-# docker-compose.yml
-version: '3.8'
-
 services:
   ai-services:
     build: .
-    container_name: ai-services # omit container_name for future scaling
+    container_name: ai-services
     restart: unless-stopped
     ports:
       - "5001:5001"  # ai_gateway_service
-      - "5002:5002"  # ai_service
+    # 🚨 CRITICAL: Override entrypoint/command to use mounted entrypoint
+    entrypoint: ["/bin/bash", "/app/entrypoint.sh"]
+    extra_hosts: #for Linux deployment, define docker's host url
+      - "host.docker.internal:host-gateway"
     environment:
       - PYTHONUNBUFFERED=1
       - PYTHONDONTWRITEBYTECODE=1
+      # model service url, for ai_gateway_service use
+      - AI_MODEL_SERVICE_URL=http://127.0.0.1:5002
+      # Include 3 service urls to the environment, so they can be accessed inside the container
+      - MILVUS_URL=http://host.docker.internal:19530
+      - REDIS_SERVER=host.docker.internal
+      - EMBED_SERVICE_URL=http://host.docker.internal:8083
+    cap_drop:
+      - ALL
+    security_opt:
+        - no-new-privileges:true
+    read_only: true  # read-only for docker file
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+      - /run:size=64m,mode=755
     volumes:
-      # Mount logs directory (ensure host dir exists with correct permissions)
+      # 🎯 Mount ALL files including entrypoint.sh, Dockerfile, etc.
+      - .:/app:rw
       - ./logs:/app/logs:rw
-      # Optional: Mount data directory
       - ./data:/app/data:rw
+      - ./persistence:/app/persistence:rw
+      - ./models:/app/models:rw
+    working_dir: /app
     healthcheck:
-      test: ["CMD", "sh", "-c", "curl -f http://127.0.0.1:5001/gateway/health && curl -f http://127.0.0.1:5002/health"]
+      test: ["CMD", "sh", "-c", "curl -f http://127.0.0.1:5001/gateway/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 300s
-    user: "1000:1000"  # Match UID from Dockerfile for volume permissions
