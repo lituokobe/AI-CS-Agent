@@ -18,7 +18,7 @@ def embed_documents(texts: list[str]) -> list[float]:
 
 # Example usage
 if __name__ == "__main__":
-    emb = embed_query("你哪位")
+    emb = embed_query("我见过你吗")
     print(f"{len(emb)}")  # Should be 1024
     print(f"{emb}")
 

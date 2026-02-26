@@ -190,7 +190,7 @@ def node_starting_logging(config: NodeConfig, thread_id: str):
     logger_chatflow.info("系统消息：%s", f"会话{thread_id}，节点{config.node_id}-{config.node_name}，开始工作")
 
 def node_ending_logging(config:NodeConfig, thread_id: str, time_cost: float|None = None):
-    if time_cost:
+    if time_cost is not None:
         logger_chatflow.info("系统消息：%s", f"会话{thread_id}，节点{config.node_id}-{config.node_name}，完成工作，耗时{time_cost}秒")
     else:
         logger_chatflow.info("系统消息：%s", f"会话{thread_id}，节点{config.node_id}-{config.node_name}，完成工作")

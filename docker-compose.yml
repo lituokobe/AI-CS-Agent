@@ -31,6 +31,7 @@ services:
       - .:/app:rw
       - ./logs:/app/logs:rw
       - ./data:/app/data:rw
+      - /data/gitdata/git_beta_web/call_center/static/uploads:/app/uploads:rw
       - ./persistence:/app/persistence:rw
       - ./models:/app/models:rw
     working_dir: /app

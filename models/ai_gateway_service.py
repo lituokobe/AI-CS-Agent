@@ -4,6 +4,8 @@ import os
 import json
 import time
 import threading
+import tempfile
+import subprocess
 from datetime import datetime
 from collections import defaultdict
 import requests
@@ -12,6 +14,8 @@ from flask import Flask, request, jsonify
 from config.setting import settings
 from common.logger import setup_logger
 from functionals.matchers import KeywordMatcher
+from pydub import AudioSegment
+from pydub.silence import detect_nonsilent
 
 app = Flask(__name__)
 logger = setup_logger('ai_gateway', category='gateway', console_output=True)
@@ -198,7 +202,8 @@ def call_model_service(model_id, backstop_model, user_input, call_id, task_id):
     # 默认返回兜底模型
     default_response = [{
         'dialog_id': 'default',
-        'content': "喂，我这边好像信号不太好，还是听不见您那边的声音，要么我先挂了，之后再联系您，再见",
+        # 'content': "喂，我这边好像信号不太好，还是听不见您那边的声音，要么我先挂了，之后再联系您，再见",
+        'content': "",
         'variate': {}
     }]
     # 这个 正式使用 按True 报错直接挂断
@@ -265,7 +270,7 @@ def calculate_final_timeout(tts_duration, config_wait_time, ai_wait_time):
 
 def process_ai_content(task_id, original_number, content_list, user_input, model_id):
     """处理AI返回的content字典，生成混合播放内容"""
-    phone_key = f"task:phone:{task_id}"
+    phone_key = f"{settings.REDIS_PRE}:task:phone:{task_id}"
     phone_info_str = redis_client.hget(phone_key, original_number)
     phone_info = json.loads(phone_info_str) if phone_info_str else {}
     try:
@@ -291,7 +296,7 @@ def process_ai_content(task_id, original_number, content_list, user_input, model
             other_config = processed_data.get('other_config', {})
 
             # 🎯 从Redis获取对话配置数据
-            dialogs_key = f"robot:{model_id}:dialogs"
+            dialogs_key = f"{settings.REDIS_PRE}:robot:{model_id}:dialogs"
             dialogs_data_str = redis_client.hget(dialogs_key, dialog_id)
             dialogs_data = json.loads(dialogs_data_str) if dialogs_data_str else {}
 
@@ -464,7 +469,7 @@ def process_segment_content(segment, variate_data, user_input, phone_info, is_ro
         if content_type == 1:  # 纯文本
             if voice_content:
                 # 🎯 如果是根节点且包含变量，需要进行变量替换
-                if is_root and contains_variables(voice_content):
+                if contains_variables(voice_content):
                     processed_text = replace_variables_in_text(voice_content, variate_data, user_input, phone_info)
                     tts_duration = calculate_tts_duration(processed_text)
                     return {
@@ -827,7 +832,7 @@ def conversation():
     logger.info(f"📞 处理对话请求 - 任务: {task_id}, 呼叫: {call_id}")
 
     # 从Redis获取对话历史
-    conversation_key = f"call:conversation:{call_id}"
+    conversation_key = f"{settings.REDIS_PRE}:call:conversation:{call_id}"
     try:
         existing_conversation = redis_client.get(conversation_key)
     except redis.RedisError as e:
@@ -1038,6 +1043,378 @@ def match_keywords():
         logger.error(f"关键词匹配错误: {str(e)}")
         return jsonify({"error": "关键词匹配错误"}), 500
 
+@app.route('/gateway/audio_edges', methods=['POST'])
+def trim_audio_edges():
+    """
+    只去除头尾的空白，保留中间的静音
+    """
+    try:
+        data = request.get_json(silent=True)
+        if not data:
+            return jsonify({"error": "无效JSON"}), 400
+        
+        input_path = data.get("input_path")
+        output_path = data.get("output_path")
+        
+        if not input_path or not output_path:
+            return jsonify({"error": "缺少必要参数: input_path 或 output_path"}), 400
+        def convert_php_path_to_container(php_path):
+            """
+            将 PHP 传来的宿主机路径转换为容器内路径
+            """
+            # 定义路径映射
+            mappings = {
+                '/data/gitdata/git_beta_web/call_center/static/uploads': '/app/uploads',
+            }
+            
+            for host_path, container_path in mappings.items():
+                if php_path.startswith(host_path):
+                    new_path = php_path.replace(host_path, container_path, 1)
+                    logger.info(f"路径映射: {php_path} -> {new_path}")
+                    return new_path
+            
+            # 如果没有映射，返回原路径并记录警告
+            logger.warning(f"路径未映射，可能无法访问: {php_path}")
+            return php_path
+        
+        original_input_path = input_path  # 保存原始路径用于日志
+        input_path = convert_php_path_to_container(input_path)
+        output_path = convert_php_path_to_container(output_path)
+        
+        logger.info(f"原始输入路径: {original_input_path}")
+        logger.info(f"转换后输入路径: {input_path}")
+        logger.info(f"转换后输出路径: {output_path}")
+        # 验证输入文件是否存在
+        if not os.path.exists(input_path):
+            return jsonify({"error": f"输入文件不存在: {input_path}"}), 400
+        
+        # 设置参数
+        silence_thresh = data.get("silence_thresh", -40)
+        min_silence_len = data.get("min_silence_len", 500)
+        # 加载音频文件
+        try:
+            audio = AudioSegment.from_file(input_path)
+        except Exception as e:
+            return jsonify({"error": f"加载音频文件失败: {str(e)}"}), 400
+        
+        original_duration = len(audio) / 1000.0
+        original_size = os.path.getsize(input_path)
+        
+        # 检测所有非静音部分
+        non_silent_ranges = detect_nonsilent(
+            audio,
+            min_silence_len=min_silence_len,
+            silence_thresh=silence_thresh
+        )
+        
+        if not non_silent_ranges:
+            return jsonify({
+                "success": False,
+                "message": "未检测到有效音频内容",
+                "original_duration": original_duration
+            })
+        
+        # 只取第一个和最后一个非静音段
+        start_time = non_silent_ranges[0][0]
+        end_time = non_silent_ranges[-1][1]
+        
+        # 裁剪音频
+        trimmed_audio = audio[start_time:end_time]
+        trimmed_duration = len(trimmed_audio) / 1000.0
+        
+        # 确保输出目录存在
+        output_dir = os.path.dirname(output_path)
+        if output_dir and not os.path.exists(output_dir):
+            os.makedirs(output_dir, exist_ok=True)
+        
+        # 获取文件扩展名
+        file_ext = output_path.split('.')[-1].lower()
+        
+        # 关键：设置优化的导出参数以减少文件大小
+        export_params = {}
+        
+        if file_ext in ['wav', 'wave']:
+            # WAV 文件：使用压缩的 PCM 格式
+            export_params = {
+                'format': 'wav',
+                'parameters': ['-acodec', 'pcm_s16le','-ar', '16000', '-ac', '1']  # 16-bit PCM，最常用
+            }
+        elif file_ext == 'mp3':
+            # MP3 文件：使用优化的比特率
+            export_params = {
+                'format': 'mp3',
+                'bitrate': '64k',  # 中等质量，文件较小
+                'parameters': ['-q:a', '4','-ar', '16000', '-ac', '1' ]  # VBR 质量参数（0-9，0最好）
+            }
+        elif file_ext in ['m4a', 'aac', 'mp4']:
+            
+            export_params = {
+                'format': 'ipod',  # 对于 M4A 格式，使用 'ipod' 格式
+                'codec': 'aac',
+                'bitrate': '64k',
+                'parameters': [
+                    '-c:a', 'aac',
+                    '-b:a', '64k',
+                    '-ar', '16000',
+                    '-ac', '1',
+                    '-profile:a', 'aac_low'
+                ]
+            }
+        else:
+            # 其他格式使用默认参数
+            export_params = {
+                'format': file_ext, 
+                'parameters': ['-ar', '16000', '-ac', '1']  # 设置采样率为16000Hz
+            }
+        
+        # 保存文件
+        # 特殊处理 M4A 格式
+        if file_ext in ['m4a', 'aac', 'mp4']:
+            # 对于 M4A 格式，使用不同的导出方式确保兼容性
+            temp_wav = output_path + '.wav'
+            
+            # 先导出为 WAV
+            trimmed_audio.export(temp_wav, format='wav')
+            
+            try:
+                # 使用 ffmpeg 转换到 M4A
+                import subprocess
+                ffmpeg_cmd = [
+                    'ffmpeg',
+                    '-i', temp_wav,
+                    '-c:a', 'aac',
+                    '-b:a', '64k',
+                    '-ar', '16000',
+                    '-ac', '1',
+                    '-profile:a', 'aac_low',
+                    '-y',  # 覆盖输出文件
+                    output_path
+                ]
+                
+                result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True)
+                if result.returncode != 0:
+                    raise Exception(f"FFmpeg 转换失败: {result.stderr}")
+                    
+            finally:
+                # 清理临时文件
+                if os.path.exists(temp_wav):
+                    os.remove(temp_wav)
+        else:
+            # 其他格式使用 pydub 直接导出
+            trimmed_audio.export(output_path, **export_params)
+        
+        
+        # 获取输出文件信息
+        output_size = os.path.getsize(output_path)
+        
+        # 只输出音频文件的关键参数
+        logger.info(f"🎵 音频处理完成:")
+        logger.info(f"  原始文件: {original_duration:.2f}s, {original_size/1024:.1f}KB")
+        logger.info(f"  裁剪后文件: {trimmed_duration:.2f}s, {output_size/1024:.1f}KB")
+        
+        
+        return jsonify({
+            "success": True,
+            "message": "音频裁剪成功",
+            "audio_info": {
+                "original_duration": round(original_duration, 2),
+                "original_size_kb": round(original_size/1024, 1),
+                "trimmed_duration": round(trimmed_duration, 2),
+                "trimmed_size_kb": round(output_size/1024, 1),
+                "sample_rate": audio.frame_rate,
+                "channels": audio.channels,
+                "bit_depth": audio.sample_width * 8,
+                "format": file_ext,
+                "export_params": export_params
+            },
+            "trim_info": {
+                "start_time": start_time,
+                "end_time": end_time,
+                "non_silent_segments": len(non_silent_ranges)
+            },
+            "output_path": output_path
+        })
+        
+    except Exception as e:
+        logger.error(f"处理音频时出错: {str(e)}")
+        
+        return jsonify({"error": f"处理音频时出错: {str(e)}"}), 500
+@app.route('/gateway/audio_merger', methods=['POST'])
+def audio_merger():
+    try:
+        data = request.get_json(silent=True)
+        if not data:
+            return jsonify({"error": "无效JSON"}), 400
+        
+        input_path = data.get("input_path")
+        output_path = data.get("output_path")
+        
+        if not input_path or not output_path:
+            return jsonify({"error": "缺少必要参数: input_path 或 output_path"}), 400
+        def convert_php_path_to_container(php_path):
+            """
+            将 PHP 传来的宿主机路径转换为容器内路径
+            """
+            # 定义路径映射
+            mappings = {
+                '/data/gitdata/git_beta_web/call_center/static/uploads': '/app/uploads',
+            }
+            
+            for host_path, container_path in mappings.items():
+                if php_path.startswith(host_path):
+                    new_path = php_path.replace(host_path, container_path, 1)
+                    logger.info(f"路径映射: {php_path} -> {new_path}")
+                    return new_path
+            
+            # 如果没有映射，返回原路径并记录警告
+            logger.warning(f"路径未映射，可能无法访问: {php_path}")
+            return php_path
+        input_paths = []
+        if isinstance(input_path, list):
+            # 数组形式
+            for i, path in enumerate(input_path):
+                if not isinstance(path, str):
+                    return jsonify({"error": f"input_path[{i}] 不是字符串"}), 400
+                
+                container_path = convert_php_path_to_container(path)
+                input_paths.append(container_path)
+                
+                logger.info(f"输入文件 {i+1}: {path} -> {container_path}")
+                
+        elif isinstance(input_path, str):
+            # 单个文件
+            container_path = convert_php_path_to_container(input_path)
+            input_paths.append(container_path)
+            logger.info(f"单个输入文件: {input_path} -> {container_path}")
+        else:
+            return jsonify({"error": f"input_path 类型错误: {type(input_path)}"}), 400
+        output_path = convert_php_path_to_container(output_path)
+        logger.info(f"转换后输出路径: {output_path}")
+        # 验证输入文件是否存在
+        missing_files = []
+        for i, path in enumerate(input_paths):
+            if not os.path.exists(path):
+                missing_files.append({
+                    "index": i,
+                    "path": path
+                })
+        
+        if missing_files:
+            error_msg = "以下文件不存在:\n"
+            for file_info in missing_files:
+                error_msg += f"  文件{file_info['index']+1}: {file_info['path']}\n"
+            return jsonify({"error": error_msg}), 400
+        bitrate = "64k"
+        sample_rate = int(16000)
+        channels = int(1)
+        logger.info(f"合并参数: 比特率={bitrate}, 采样率={sample_rate}, 声道={channels}")
+        logger.info(f"开始合并 {len(input_paths)} 个WAV文件...")
+        temp_dir = tempfile.mkdtemp(prefix="audio_merge_")
+        logger.info(f"临时目录: {temp_dir}")
+        try:
+            result = _merge_multiple_wavs_simple(
+                input_paths,
+                output_path,
+                temp_dir,
+                sample_rate,
+                channels,
+            )
+            if result["success"]:
+                # 验证输出文件
+                if not os.path.exists(output_path):
+                    return jsonify({"error": "合并成功但输出文件不存在"}), 500
+                
+                file_size = os.path.getsize(output_path)
+                
+                
+                logger.info(f"✅ 合并成功: {output_path}")
+                
+                
+                return jsonify({
+                    "success": True,
+                    "message": f"成功合并 {len(input_paths)} 个WAV文件",
+                    "data": {
+                        "file_size": file_size,
+                    }
+                })
+            else:
+                return jsonify({"error": result["error"]}), 500
+                
+        finally:
+            # 清理临时文件
+            _cleanup_temp_dir(temp_dir)
+    except Exception as e:
+        logger.error(f"合并音频时出错: {str(e)}")
+        return jsonify({"error": f"合并音频时出错: {str(e)}"}), 500
+    
+def _merge_multiple_wavs_simple(input_paths, output_path, temp_dir, 
+                               sample_rate=16000, channels=1):
+    """合并多个WAV文件 - 使用交叉淡入淡出处理衔接"""
+    try:
+        # 为每个输入音频流添加0.5秒静音垫片（apad），然后再拼接
+        filter_chains = []
+        concat_inputs = []
+        pad_duration = 0.5
+        for i in range(len(input_paths)):
+            if i < len(input_paths) - 1:
+                filter_chains.append(f"[{i}:a]apad=pad_dur={pad_duration}[pad{i}]")
+            else:
+                filter_chains.append(f"[{i}:a]anull[pad{i}]")  # 直接映射，无垫片
+            concat_inputs.append(f"[pad{i}]")
+        
+        # 连接所有添加了静音垫片的音频流
+        filter_complex = f"{';'.join(filter_chains)};{''.join(concat_inputs)}concat=n={len(input_paths)}:v=0:a=1[out]"
+        
+        # 3. 构建FFmpeg命令
+        ffmpeg_cmd = ['ffmpeg', '-y']
+        
+        # 添加所有输入文件
+        for file_path in input_paths:
+            ffmpeg_cmd.extend(['-i', file_path])
+        
+        # 添加滤镜和输出参数
+        ffmpeg_cmd.extend([
+            '-filter_complex', filter_complex,
+            '-map', '[out]',          # 映射输出流
+            '-c:a', 'pcm_s16le',     # 输出格式：16-bit PCM WAV
+            '-ar', str(sample_rate), # 采样率
+            '-ac', str(channels),    # 声道数
+            output_path
+        ])
+        
+        logger.info(f"执行合并命令: {' '.join(ffmpeg_cmd)}")
+        
+        # 4. 执行命令
+        result = subprocess.run(
+            ffmpeg_cmd,
+            capture_output=True,
+            text=True,
+            timeout=180  # 3分钟超时
+        )
+        
+        if result.returncode != 0:
+            logger.error(f"合并失败，错误: {result.stderr}")
+            return {"success": False, "error": f"合并失败: {result.stderr[:200]}"}
+        
+        logger.info("✅ 文件合并成功")
+        return {"success": True}
+        
+    except subprocess.TimeoutExpired:
+        logger.error("合并处理超时")
+        return {"success": False, "error": "处理超时"}
+    except Exception as e:
+        logger.error(f"合并过程出错: {str(e)}")
+        return {"success": False, "error": str(e)}
+       
+def _cleanup_temp_dir(temp_dir):
+    """清理临时目录"""
+    try:
+        import shutil
+        if os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir)
+            logger.info(f"清理临时目录: {temp_dir}")
+    except Exception as e:
+        logger.warning(f"清理临时目录失败: {str(e)}")    
 def check_model_service_health():
     """检查AI模型服务健康状态"""
     try:

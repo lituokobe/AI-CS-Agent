@@ -7,8 +7,8 @@ from langgraph.checkpoint.redis import AsyncRedisSaver
 from agent_builders.chatflow_builder import build_chatflow
 from config.config_setup import ChatFlowConfig
 from config.db_setting import DBSetting
-# from data.simulated_data_lt import agent_data, knowledge, knowledge_main_flow, chatflow_design, global_configs, intentions
-from data.simulated_data_lt_simplified import agent_data, knowledge, knowledge_main_flow, chatflow_design, global_configs, intentions
+from data.simulated_data_lt import agent_data, knowledge, knowledge_main_flow, chatflow_design, global_configs, intentions
+# from data.simulated_data_lt_simplified import agent_data, knowledge, knowledge_main_flow, chatflow_design, global_configs, intentions
 # from data.simulated_data import agent_data, knowledge, knowledge_main_flow, chatflow_design, global_configs, intentions
 # from data.simulated_data_xyp20251222 import agent_data, knowledge, knowledge_main_flow, chatflow_design, global_configs, intentions
 from functionals.log_utils import logger_chatflow

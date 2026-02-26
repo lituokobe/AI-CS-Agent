@@ -11,7 +11,7 @@ from pymilvus import MilvusClient, AsyncMilvusClient
 from functionals.embedding_functions import embed_query
 
 # LLM approach
-from models.llm_models import qwen_llm, deepseek_llm, glm_llm, local_llm
+from models.llm_models import qwen_turbo, qwen_flash, qwen_max, deepseek_llm, glm_llm, local_llm
 from data.string_asset import docstring_base_raw, priority_map, docstring_tail
 from langchain_core.messages import HumanMessage
 import ast
@@ -44,7 +44,8 @@ class KeywordMatcher:
         if intentions:
             self.load_keywords_from_dict(intentions)
 
-    def _is_probably_regex(self, pattern: str) -> bool:
+    @staticmethod
+    def _is_probably_regex(pattern: str) -> bool:
         """
         Heuristic to detect if a string is intended as a regex.
         You can adjust this logic if needed (e.g., require explicit flag).
@@ -233,16 +234,21 @@ class LLMInferenceMatcher:
         # select llm runnable
         self.llm_runnable = self._select_llm(config.agent_config.llm_name)
 
-    def _select_llm(self, llm_name: str):
-        if llm_name == "qwen_llm":
-            return qwen_llm
+    @staticmethod
+    def _select_llm(llm_name: str):
+        if llm_name == "qwen_turbo":
+            return qwen_turbo
+        elif llm_name == "qwen_flash":
+            return qwen_flash
+        elif llm_name == "qwen_max":
+            return qwen_max
         elif llm_name == "local_llm":
             return local_llm
         elif llm_name == "deepseek_llm":
             return deepseek_llm
         elif llm_name == "glm_llm":
             return glm_llm
-        return deepseek_llm
+        return qwen_turbo
 
     def _create_base_docstring(self, intention_priority: int) -> list:
         """
@@ -279,7 +285,8 @@ class LLMInferenceMatcher:
 
         return docstring_base
 
-    def _parse_llm_json_output(self, text: str) -> tuple[str, str]:
+    @staticmethod
+    def _parse_llm_json_output(text: str) -> tuple[str, str]:
         """
         Parse LLM output robustly. Always returns (input_summary, intention_id).
         """
@@ -330,7 +337,7 @@ class LLMInferenceMatcher:
                 elif msg.__class__.__name__ == "AIMessage":
                     ai_message = msg.content
                     if ai_message:
-                        docstring_chat_history.append(f"- 【智能客服】{ai_message}")
+                        docstring_chat_history.append(f"- 【智能助手】{ai_message}")
             docstring_chat_history.append("")
 
             # Create full prompt
@@ -339,7 +346,7 @@ class LLMInferenceMatcher:
                                   "### **最后一次用户输入**",
                                   user_input,
                                   "",
-                                  "### 智能助手和用户的全部对话历史（务必参考）"
+                                  "### 智能助手和用户的对话历史（务必参考）"
                               ] +
                               docstring_chat_history +
                               docstring_tail)
@@ -351,7 +358,7 @@ class LLMInferenceMatcher:
 
             # Get the tokens consumed per round of conversation including the preconfigured doc string, full chat history, AI reply, etc.
             token_used = int(resp.response_metadata.get("token_usage", {}).get("total_tokens", 0))
-            print(f"大模型回复内容： {resp.content}")
+            print(f"大模型回复内容： {resp}")
             input_summary, intention_id = self._parse_llm_json_output(resp.content)
         except Exception as e:
             logger_chatflow.error("LLM推理调用异常：%s", {e})

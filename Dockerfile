@@ -3,6 +3,7 @@ FROM python:3.11-slim-bookworm
 # Install minimal dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
