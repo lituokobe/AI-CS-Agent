@@ -5,7 +5,7 @@ ALI_BASE_URL= "https://dashscope.aliyuncs.com/compatible-mode/v1"
 ALI_API_KEY = ""
 
 DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1"
-DEEPSEEK_API_KEY = "sk-f952f77c672b48eda62fe9a15780a85d"
+DEEPSEEK_API_KEY = ""
 
 GLM_BASE_URL = "https://open.bigmodel.cn/api/paas/v4"
 GLM_API_KEY = ""
