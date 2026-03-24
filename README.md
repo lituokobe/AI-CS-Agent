@@ -103,10 +103,12 @@ When both node-specific intents and global knowledge intents are evaluated, one 
 
 ### Core Models
 
-| Component            | Model                                                                                                                                                                                                                  | Description                                   |
-|----------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------|
-| **Embedding Model**  | [BGE-Large-Zh-v1.5](https://huggingface.co/BAAI/bge-large-zh-v1.5)                                                                                                                                                     | Semantic embedding and similarity computation |
-| **LLM (API-based)**  | - [Qwen-max](https://qwen-ai.chat/models/qwen3-max/) (most accurate)<br/>- [Qwen-flash](https://qwen-ai.chat/models/qwen-flash/) (fastest)<br/>- [Qwen-turbo](https://qwen-ai.chat/models/qwen-turbo/) (most balanced) | Intent classifying with complex reasoning     |
+| Component                    | Model                                                                                                                                                                                                                  | Description                                     |
+|------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------|
+| **Embedding Model**          | [BGE-Large-Zh-v1.5](https://huggingface.co/BAAI/bge-large-zh-v1.5)                                                                                                                                                     | Semantic embedding and similarity computation   |
+| **LLM (API-based)**          | - [Qwen-max](https://qwen-ai.chat/models/qwen3-max/) (most accurate)<br/>- [Qwen-flash](https://qwen-ai.chat/models/qwen-flash/) (fastest)<br/>- [Qwen-turbo](https://qwen-ai.chat/models/qwen-turbo/) (most balanced) | Intent classifying with complex reasoning       |
+| **LLM (Privately-deployed)** | - [Qwen3-4B Fined-tuend with LoRA](https://github.com/lituokobe/Qwen3-Fine-Tuning) <br/>(Production-ready in speed, latency, cost and security)                                                                        | Intent classifying with complex reasoning       |
+
 
 ### Core Components
 
