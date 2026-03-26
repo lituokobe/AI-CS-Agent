@@ -351,14 +351,11 @@ class LLMInferenceMatcher:
                               docstring_chat_history +
                               docstring_tail)
             full_prompt = "\n".join(full_docstring)
-            print(f"{self.config.node_id}-{self.config.node_name}节点的大模型提示词 \n{full_prompt}")
-            print()
             # Invoke the llm
             resp = await self.llm_runnable.ainvoke([HumanMessage(content=full_prompt)])
 
             # Get the tokens consumed per round of conversation including the preconfigured doc string, full chat history, AI reply, etc.
             token_used = int(resp.response_metadata.get("token_usage", {}).get("total_tokens", 0))
-            print(f"大模型回复内容： {resp}")
             input_summary, intention_id = self._parse_llm_json_output(resp.content)
         except Exception as e:
             logger_chatflow.error("LLM推理调用异常：%s", {e})
@@ -369,7 +366,4 @@ class LLMInferenceMatcher:
         elif intention_id in self.knowledge_infer_name:
             user_intention = self.knowledge_infer_name[intention_id]
             inference_type = "知识库"
-
-        print(f"大模型回复处理后内容：intention_id: {intention_id}, user_intention: {user_intention}, "
-              f"input_summary: {input_summary}, inference_type: {inference_type}")
         return intention_id, user_intention, input_summary, inference_type, token_used

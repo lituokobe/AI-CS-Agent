@@ -210,38 +210,79 @@ def call_model_service(model_id, backstop_model, user_input, call_id, task_id):
     return default_response, [], backstop_model, True
 
 
+import re
 def calculate_tts_duration(text, speed=1.0):
-    """计算TTS语音时长"""
+    """
+    计算TTS语音时长
+    支持格式：
+    - [p500] 停顿500毫秒
+    - <break time="500ms"/> SSML停顿标签
+    - 其他SSML标签会被忽略（只计算文本内容）
+    """
     print(text, '计算TTS语音时长')
     if not text:
         return 0
 
-        # 统计字符类型 - 准确统计
-    chinese_chars = len([c for c in text if '\u4e00' <= c <= '\u9fff'])
+    # 1. 处理 [p数字] 格式的停顿
+    pause_pattern = r'\[p(\d+)\]'
+    pauses = re.findall(pause_pattern, text)
+    total_pause_time = sum(int(pause) / 1000 for pause in pauses)
 
-    # 只统计英文字母，不包括数字
+    # 2. 处理 <break time="500ms"/> 格式的SSML停顿
+    ssml_break_pattern = r'<break\s+time="(\d+)ms"\s*/?>'
+    ssml_pauses = re.findall(ssml_break_pattern, text, re.IGNORECASE)
+    total_pause_time += sum(int(pause) / 1000 for pause in ssml_pauses)
+
+    print(f"停顿标记: {pauses + ssml_pauses}, 总停顿: {total_pause_time}秒")
+
+    # 3. 移除所有标签，只保留纯文本
+    # 移除 [p数字] 标签
+    text = re.sub(pause_pattern, '', text)
+    # 移除所有XML/HTML标签（包括<break>、<speak>等）
+    text = re.sub(r'<[^>]+>', '', text)
+    # 移除空白字符（可选）
+    text = text.strip()
+
+    if not text:  # 如果只有停顿没有文本
+        return max(0.5, round(total_pause_time, 2))
+
+    # 统计字符类型
+    chinese_chars = len([c for c in text if '\u4e00' <= c <= '\u9fff'])
     english_letters = len([c for c in text if 'a' <= c.lower() <= 'z'])
+    numbers = len([c for c in text if c.isdigit()])
 
     # 标点符号
-    punctuation = len([c for c in text if c in '，。！？；：,.!?;:'])
+    chinese_punctuation = len([c for c in text if c in '，。！？；：'])
+    english_punctuation = len([c for c in text if c in ',.!?;:'])
 
+    print(f"清理后文本: {text}")
     print(f"文本长度: {len(text)} 字符")
     print(f"中文: {chinese_chars}字")
     print(f"英文: {english_letters}字母")
-    print(f"标点: {punctuation}个")
+    print(f"数字: {numbers}个")
+    print(f"中文标点: {chinese_punctuation}个")
+    print(f"英文标点: {english_punctuation}个")
 
-    # 更准确的经验公式
-    # 中文语速：约4-5字/秒（每个字0.2-0.25秒）
-    # 英文语速：约3-4字母/秒（每个字母0.25-0.33秒）
+    # 经验公式（可根据实际TTS引擎调整）
+    # 不同语言/字符的朗读速度
+    chinese_time = chinese_chars * 0.26  # 每个中文字约0.22秒
+    english_time = english_letters * 0.18  # 每个英文字母约0.18秒
+    number_time = numbers * 0.15  # 每个数字约0.15秒
+    punctuation_time = chinese_punctuation * 0.15 + english_punctuation * 0.08
 
-    base_duration = chinese_chars * 0.2 + english_letters * 0.25
-    pause_duration = punctuation * 0.21
+    # 基础朗读时长
+    speech_duration = chinese_time + english_time + number_time + punctuation_time
 
-    total_duration = (base_duration + pause_duration) / speed
+    # 加上停顿标记的时间（停顿不受语速影响）
+    total_duration = (speech_duration / speed) + total_pause_time
 
-    print(f"{base_duration:.1f} 基础")
-    print(f"{pause_duration:.1f} 符号")
-    print(f"预估时长: {round(total_duration, 1)} 秒")
+    print(f"{chinese_time:.1f}秒 中文")
+    print(f"{english_time:.1f}秒 英文")
+    print(f"{number_time:.1f}秒 数字")
+    print(f"{punctuation_time:.1f}秒 标点")
+    print(f"{speech_duration:.1f}秒 总朗读时长")
+    print(f"语速系数: {speed}")
+    print(f"加上停顿后总时长: {total_duration:.1f}秒")
 
     return max(1.0, round(total_duration, 2))
 
@@ -273,6 +314,7 @@ def process_ai_content(task_id, original_number, content_list, user_input, model
     phone_key = f"{settings.REDIS_PRE}:task:phone:{task_id}"
     phone_info_str = redis_client.hget(phone_key, original_number)
     phone_info = json.loads(phone_info_str) if phone_info_str else {}
+    logger.info(f"phone_key:{phone_key} --original_number:{original_number} -- phone_info_str: {phone_info_str} --phone_info:{phone_info} ")
     try:
         final_content_list = []
         mixed_list = []
@@ -343,7 +385,13 @@ def process_ai_content(task_id, original_number, content_list, user_input, model
 
                             # 🎯 收集文本部分，用于构建最终文本
                             if segment_content['type'] == 'tts':
+                                # TTS 片段的文本已替换变量
                                 final_text_parts.append(segment_content['value'])
+                            elif segment_content['type'] == 'audio':
+                                # 音频片段取原始的 voice_content（不含变量）
+                                audio_text = segment.get('voice_content', '')
+                                if audio_text:
+                                    final_text_parts.append(audio_text)
 
                     # 🎯 构建最终TTS文本
                     if final_text_parts:
@@ -585,6 +633,7 @@ def process_variable(var_name, variate_data, user_input, phone_info):
 def find_var_value_in_phone_info(var_name, phone_info, var_config):
     """在phone_info中查找变量值，支持多级查找策略"""
     try:
+        logger.info(f"✅ phone_info: {phone_info} ---var_name:{var_name} --- var_config:{var_config}" )
         # 🎯 第一级：直接按var_name查找
         for item in phone_info:
             if item.get('var_name') == var_name:

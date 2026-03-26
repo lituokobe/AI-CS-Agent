@@ -700,16 +700,6 @@ class IntentionNode:
             })
 
         if self.config.enable_logging:
-            # logger_chatflow.info(
-            #     "本节点最新log：%s",
-            #     "; ".join(
-            #         f"{k}:{(v[:12] + '...' if k == 'content' and isinstance(v, str) and len(v) > 12 else v)}"
-            #         for k, v in updated_logs[-1].items()
-            #     )
-            # )
-            print(f"匹配到：{updated_logs[-1].get('match_to')}，"
-                  f"匹配方式：{updated_logs[-1].get('infer_tool')}，"
-                  f"匹配内容：{updated_logs[-1].get('matching_content')}")
             node_ending_logging(self.config, thread_id, updated_logs[-1].get("time_cost", 0.000) if updated_logs else 0.000)
 
         return {

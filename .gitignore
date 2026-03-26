@@ -31,6 +31,7 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+.venv
 
 # IDE 和编辑器
 .vscode/
@@ -77,7 +78,8 @@ Desktop.ini
 # 文档生成
 docs/_build/
 ._*
-/config/db_setting.py
 /backups
 /persistence
 /chroma_db
+
+/config/db_setting.py

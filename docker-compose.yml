@@ -12,12 +12,18 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - PYTHONDONTWRITEBYTECODE=1
+      - TZ=Asia/Shanghai
       # model service url, for ai_gateway_service use
       - AI_MODEL_SERVICE_URL=http://127.0.0.1:5002
       # Include 3 service urls to the environment, so they can be accessed inside the container
-      - MILVUS_URL=http://host.docker.internal:19530
-      - REDIS_SERVER=host.docker.internal
-      - EMBED_SERVICE_URL=http://host.docker.internal:8083
+      # If milvus and redis are deployed on the same machine:
+#      - MILVUS_URL=http://host.docker.internal:19530
+#      - REDIS_SERVER=host.docker.internal
+#      - EMBED_SERVICE_URL=http://host.docker.internal:8083
+      # milvus and redis are deployed on another machine, use their internal IP:
+      - MILVUS_URL=http://172.29.121.236:19530
+      - REDIS_SERVER=172.29.121.236
+      - EMBED_SERVICE_URL=http://172.29.121.236:8083
     cap_drop:
       - ALL
     security_opt:
@@ -28,12 +34,13 @@ services:
       - /run:size=64m,mode=755
     volumes:
       # 🎯 Mount ALL files including entrypoint.sh, Dockerfile, etc.
-      - .:/app:rw
+      - .:/app:ro
       - ./logs:/app/logs:rw
+      - ./static/logs:/app/static/logs:rw
       - ./data:/app/data:rw
-      - /data/gitdata/git_beta_web/call_center/static/uploads:/app/uploads:rw
       - ./persistence:/app/persistence:rw
       - ./models:/app/models:rw
+
     working_dir: /app
     healthcheck:
       test: ["CMD", "sh", "-c", "curl -f http://127.0.0.1:5001/gateway/health"]

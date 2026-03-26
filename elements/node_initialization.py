@@ -189,7 +189,7 @@ def create_knowledge_transfer_node(
                              chatflow_design_context=chatflow_design_context,
                              # logic to decide next node:
                              action=transfer_node.get("action", 1),
-                             next_=transfer_node.get("next", None),
+                             next_=transfer_node.get("master_process_id", None),
                              # master_process_id= transfer_node.get("master_process_id", None)
                              )
     """

@@ -268,13 +268,6 @@ class ReplyNode:
 
         # Log information
         if self.config.enable_logging:
-            # logger_chatflow.info(
-            #     "本节点最新log：%s",
-            #     "; ".join(
-            #         f"{k}:{(v[:12] + '...' if k == 'content' and isinstance(v, str) and len(v) > 12 else v)}"
-            #         for k, v in updated_logs[-1].items()
-            #     )
-            # )
             node_ending_logging(self.config, thread_id)
         return {
             "messages": current_message,
@@ -595,13 +588,6 @@ class ReplyNodeKGF:
             updated_metadata = copy.deepcopy(metadata)
         # Log information
         if self.config.enable_logging:
-            # logger_chatflow.info(
-            #     "本节点最新log：%s",
-            #     "; ".join(
-            #         f"{k}:{(v[:12] + '...' if k == 'content' and isinstance(v, str) and len(v) > 12 else v)}"
-            #         for k, v in updated_logs[-1].items()
-            #     )
-            # )
             node_ending_logging(self.config, thread_id)
         return {
             "messages": current_message,
@@ -913,13 +899,6 @@ class ReplyNodeKT:
         # Log information
         if self.config.enable_logging:
             if updated_logs[-1]:
-                # logger_chatflow.info(
-                #     "本节点最新log：%s",
-                #     "; ".join(
-                #         f"{k}:{(v[:12] + '...' if k == 'content' and isinstance(v, str) and len(v) > 12 else v)}"
-                #         for k, v in updated_logs[-1].items()
-                #     )
-                # )
                 node_ending_logging(self.config, thread_id)
         return {
             "messages": current_message,

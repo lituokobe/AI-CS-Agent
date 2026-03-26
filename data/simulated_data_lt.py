@@ -1,10 +1,10 @@
 agent_data = {
-  "enable_nlp": 1,
+  "enable_nlp": 0,
   "nlp_threshold": 0.8,
   "intention_priority": 3,
 
-  "use_llm": 0,
-  "llm_name": "qwen_llm",#"local_llm" "deepseek_llm" "glm_llm", "qwen_llm",
+  "use_llm": 1,
+  "llm_name": "deepseek_llm",#"local_llm" "deepseek_llm" "glm_llm", "qwen_llm",
   "llm_threshold": 3,
   "llm_context_rounds": 2,
   "llm_role_description": "你是一个专业的家装平台的电话营销专员，你的任务是获取上海可能有装修意向的客户",

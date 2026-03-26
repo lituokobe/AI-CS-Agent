@@ -45,6 +45,26 @@ start_service() {
     local log_file=$4
 
     echo "Starting $service_name (port $port)..."
+
+    # 🔍 DEBUG: Reveal exact log_file value
+    echo "🔍 [DEBUG] log_file raw: [${log_file}]" >&2
+    echo "🔍 [DEBUG] log_file hex: $(printf '%s' "${log_file}" | xxd -p 2>/dev/null || echo 'xxd not available')" >&2
+    echo "🔍 [DEBUG] log_file length: ${#log_file}" >&2
+
+    # Check target directory
+    local log_dir="$(dirname "${log_file}")"
+    echo "🔍 [DEBUG] log_dir: [${log_dir}]" >&2
+    echo "🔍 [DEBUG] dir exists: $(test -d "${log_dir}" && echo YES || echo NO)" >&2
+    echo "🔍 [DEBUG] dir writable: $(test -w "${log_dir}" && echo YES || echo NO)" >&2
+
+    # Try a simple redirect test with the exact variable
+    if ! touch "${log_file}.test" 2>&1; then
+        echo "❌ [DEBUG] Cannot create file with this variable value!" >&2
+    else
+        echo "✅ [DEBUG] File creation with variable succeeded" >&2
+        rm -f "${log_file}.test"
+    fi
+
     # Start service in background
     python "$script_path" > "$log_file" 2>&1 &
     local pid=$!
