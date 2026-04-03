@@ -243,6 +243,8 @@ class DynamicModelManager:
                 if expire_time:
                     self.models[model_id]['expire_time'] = expire_time
                 logger_chatflow.info(f"模型 {model_id} 已存在，增加使用计数: {self.model_usage[model_id]}")
+                # 通知PHP模型激活
+                self._notify_php_model_activated(model_id)
                 return True
 
             try:

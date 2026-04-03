@@ -339,6 +339,7 @@ def process_ai_content(task_id, original_number, content_list, user_input, model
 
             # 🎯 从Redis获取对话配置数据
             dialogs_key = f"{settings.REDIS_PRE}:robot:{model_id}:dialogs"
+            logger.warning(f'对话配置KEY-> {dialogs_key}')
             dialogs_data_str = redis_client.hget(dialogs_key, dialog_id)
             dialogs_data = json.loads(dialogs_data_str) if dialogs_data_str else {}
 

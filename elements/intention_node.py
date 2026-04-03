@@ -530,24 +530,25 @@ class IntentionNode:
                         e_m = f"会话{thread_id}，节点{self.config.node_id}-{self.config.node_name}，{type_id}不在知识库中"
                         logger_chatflow.error(e_m)
                         match_to = "知识库"
-                    if knowledge_match_balance[type_id] > 0:
-                        next_state = type_id  # Navigate to the knowledge reply sub-node
-                        knowledge_match_balance[type_id] -= 1
-                        knowledge_type = self.knowledge_type_lookup.get(type_id)
-                        match_to = "知识库"
-                    # When there is NO remaining balance for the knowledge
-                    elif self.default_in_node:  # no reply configuration at node level
-                        branch_type = "DEFAULT"
-                        branch_id = self.branch_type_id_lookup[branch_type]
-                        branch_name = self.branch_id_name_lookup.get(branch_id)
-                        branch_type_count[branch_type] = branch_type_count.get(branch_type, 0) + 1
-                        next_state = branch_id
-                        match_to = "没有意图命中"
-                    elif self.global_no_infer_result:  # no reply configuration at global level
-                        next_state = "no_infer_result"
-                        match_to = "没有意图命中"
                     else:
-                        match_to = "没有意图命中"
+                        if knowledge_match_balance[type_id] > 0:
+                            next_state = type_id  # Navigate to the knowledge reply sub-node
+                            knowledge_match_balance[type_id] -= 1
+                            knowledge_type = self.knowledge_type_lookup.get(type_id)
+                            match_to = "知识库"
+                        # When there is NO remaining balance for the knowledge
+                        elif self.default_in_node:  # no reply configuration at node level
+                            branch_type = "DEFAULT"
+                            branch_id = self.branch_type_id_lookup[branch_type]
+                            branch_name = self.branch_id_name_lookup.get(branch_id)
+                            branch_type_count[branch_type] = branch_type_count.get(branch_type, 0) + 1
+                            next_state = branch_id
+                            match_to = "没有意图命中"
+                        elif self.global_no_infer_result:  # no reply configuration at global level
+                            next_state = "no_infer_result"
+                            match_to = "没有意图命中"
+                        else:
+                            match_to = "没有意图命中"
                     log_info = {
                         **previous_log,
                         "role": "user",
@@ -597,12 +598,12 @@ class IntentionNode:
                         "branch_name": branch_name,
                         "branch_type": branch_type,
                         "branch_type_count": branch_type_count,
-                        "intention_id": "",
-                        "intention_name": "",
+                        "intention_id": type_id,
+                        "intention_name": type_name,
                         "infer_tool": infer_tool_str[4],
                         "llm_input_summary": "",
-                        "matching_content": "",
-                        "matching_score": 0.0,
+                        "matching_content": content,
+                        "matching_score": round(cos_score, 3),
                         "knowledge_type": knowledge_type,
                         "knowledge_match_balance": knowledge_match_balance,
                         "other_config": self.config.other_config or {},

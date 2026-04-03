@@ -3,10 +3,12 @@ from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableConfig
 from config.config_setup import NodeConfig, ChatflowDesignContext, KnowledgeContext
 from data.string_asset import infer_tool_str
-from functionals.log_utils import logger_chatflow
+from common.logger import setup_logger
 from functionals.state import ChatState
 from functionals.utils import process_reply, get_last_user_log, get_logs_from_last_user, get_last_user_message, \
     last_message_is_ai, update_target, node_starting_logging, node_ending_logging
+
+logger = setup_logger('reply_node', category='reply_node', console_output=True)
 
 #TODO: Class to define regular reply node
 #This node will respond the user based on the pre-configured reply
@@ -38,7 +40,7 @@ class ReplyNode:
         #This config is the input argument config that stores thread info, different from self.config
         thread_id = config.get("configurable", {}).get("thread_id", "")
         if not thread_id:
-            logger_chatflow.error("当前会话没有thread_id")
+            logger.warning("当前会话没有thread_id")
 
         if self.config.enable_logging:
             node_starting_logging(self.config, thread_id)
@@ -152,7 +154,7 @@ class ReplyNode:
                         }
                     else:
                         e_m = f"会话{thread_id}，节点{self.config.node_id}-{self.config.node_name}，主线流程匹配方式有误"
-                        logger_chatflow.error(e_m)
+                        logger.warning(e_m)
                         user_logic_title = {
                             "匹配到": match_to,
                             "匹配到分支": f"【{last_user_log.get('branch_name', '')}】-【{last_user_log.get('intention_name', '')}】",
@@ -187,7 +189,7 @@ class ReplyNode:
                         }
                     else:
                         e_m = f"会话{thread_id}，节点{self.config.node_id}-{self.config.node_name}，知识库匹配方式有误"
-                        logger_chatflow.error(e_m)
+                        logger.warning(e_m)
                         user_logic_title = {
                             "匹配到": match_to,
                             "匹配到分支": f"【{last_user_log.get('branch_name', '')}】-【{last_user_log.get('intention_name', '')}】",
@@ -195,20 +197,28 @@ class ReplyNode:
                         }
                 elif match_to == "没有意图命中":
                     if infer_tool in set(infer_tool_str):
-                        user_logic_title = {
-                            "匹配到": match_to,
-                            "匹配方式": f"【{infer_tool}】",
-                        }
+                        if infer_tool == "开启nlp（问法），未使用大模型":
+                            user_logic_title = {
+                                "匹配到": match_to,
+                                "匹配方式": f"【{infer_tool}】",
+                                "最高相似度分数": last_user_log.get('matching_score', 0.0), # show the matching score so long as nlp is used
+                                "最高相似度内容": f"【{last_user_log.get('matching_content')}】",
+                            }
+                        else:
+                            user_logic_title = {
+                                "匹配到": match_to,
+                                "匹配方式": f"【{infer_tool}】",
+                            }
                     else:
                         e_m = f"会话{thread_id}，节点{self.config.node_id}-{self.config.node_name}，没有意图命中匹配方式有误"
-                        logger_chatflow.error(e_m)
+                        logger.warning(e_m)
                         user_logic_title = {
                             "匹配到": match_to,
                             "匹配方式": f"【{infer_tool}】"
                         }
                 else:
                     e_m = f"会话{thread_id}，节点{self.config.node_id}-{self.config.node_name}，用户log匹配流程有误"
-                    logger_chatflow.error(e_m)
+                    logger.warning(e_m)
                     user_logic_title = {
                         "匹配到": match_to
                     }
@@ -268,6 +278,13 @@ class ReplyNode:
 
         # Log information
         if self.config.enable_logging:
+            # logger.info(
+            #     "本节点最新log：%s",
+            #     "; ".join(
+            #         f"{k}:{(v[:12] + '...' if k == 'content' and isinstance(v, str) and len(v) > 12 else v)}"
+            #         for k, v in updated_logs[-1].items()
+            #     )
+            # )
             node_ending_logging(self.config, thread_id)
         return {
             "messages": current_message,
@@ -299,7 +316,7 @@ class ReplyNodeKGF:
                 ]
             except Exception as e:
                 e_m = f"{self.config.node_id}-{self.config.node_name}节点提取回复信息有误: {e}"
-                logger_chatflow.error(e_m)
+                logger.error(e_m)
                 raise ValueError(e_m)
 
         # Node information of the whole chatflow design. They will be used to decide next node.
@@ -316,7 +333,7 @@ class ReplyNodeKGF:
         #This config is the input argument config that stores thread info, different from self.config
         thread_id = config.get("configurable", {}).get("thread_id", "")
         if not thread_id:
-            logger_chatflow.error("当前会话没有thread_id")
+            logger.warning("当前会话没有thread_id")
 
         if self.config.enable_logging:
             node_starting_logging(self.config, thread_id)
@@ -352,11 +369,11 @@ class ReplyNodeKGF:
             # Validate action
             if action not in {1, 2, 3}:  # 1-等待用户回复 2-挂断 3-跳转主流程
                 e_m = f"会话{thread_id}，节点{self.config.node_id}-{self.config.node_name}，执行动作无效"
-                logger_chatflow.error(e_m) # Only log the error, don't stop the program
+                logger.warning(e_m) # Only log the error, don't stop the program
                 action = 2
         else:
             e_m = f"会话{thread_id}，节点{self.config.node_id}-{self.config.node_name}，没有设定回答话术"
-            logger_chatflow.error(e_m) # Only log the error, don't stop the program
+            logger.warning(e_m) # Only log the error, don't stop the program
             action = 2
 
         #Move the node just used to the last
@@ -379,7 +396,7 @@ class ReplyNodeKGF:
                 transfer_node_id = next_reply.get("next")
                 if transfer_node_id not in {-1, -2, 3}:  # -1-原主线节点 -2-原主线流程 3-指定主线流程
                     e_m = f"会话{thread_id}，节点{self.config.node_id}-{self.config.node_name}，指定主线流程无效"
-                    logger_chatflow.error(e_m)
+                    logger.warning(e_m)
                     next_state = "hang_up"
                 elif transfer_node_id == -1 : # 原主线节点
                     last_mf_node = None
@@ -408,6 +425,7 @@ class ReplyNodeKGF:
             else:
                 next_state = "hang_up"
 
+        self.end_call = False
         if next_state == "hang_up":
             self.end_call = True
 
@@ -480,7 +498,7 @@ class ReplyNodeKGF:
                         }
                     else:
                         e_m = f"会话{thread_id}，节点{self.config.node_id}-{self.config.node_name}，主线流程匹配方式有误"
-                        logger_chatflow.error(e_m)
+                        logger.warning(e_m)
                         user_logic_title = {
                             "匹配到": match_to,
                             "匹配到分支": f"【{last_user_log.get('branch_name', '')}】-【{last_user_log.get('intention_name', '')}】",
@@ -515,7 +533,7 @@ class ReplyNodeKGF:
                         }
                     else:
                         e_m = f"会话{thread_id}，节点{self.config.node_id}-{self.config.node_name}，知识库匹配方式有误"
-                        logger_chatflow.error(e_m)
+                        logger.warning(e_m)
                         user_logic_title = {
                             "匹配到": match_to,
                             "匹配到分支": f"【{last_user_log.get('branch_name', '')}】-【{last_user_log.get('intention_name', '')}】",
@@ -523,20 +541,28 @@ class ReplyNodeKGF:
                         }
                 elif match_to == "没有意图命中":
                     if infer_tool in set(infer_tool_str):
-                        user_logic_title = {
-                            "匹配到": match_to,
-                            "匹配方式": f"【{infer_tool}】",
-                        }
+                        if infer_tool == "开启nlp（问法），未使用大模型":
+                            user_logic_title = {
+                                "匹配到": match_to,
+                                "匹配方式": f"【{infer_tool}】",
+                                "最高相似度分数": last_user_log.get('matching_score', 0.0), # show the matching score so long as nlp is used
+                                "最高相似度内容": f"【{last_user_log.get('matching_content')}】",
+                            }
+                        else:
+                            user_logic_title = {
+                                "匹配到": match_to,
+                                "匹配方式": f"【{infer_tool}】",
+                            }
                     else:
                         e_m = f"会话{thread_id}，节点{self.config.node_id}-{self.config.node_name}，没有意图命中匹配方式有误"
-                        logger_chatflow.error(e_m)
+                        logger.warning(e_m)
                         user_logic_title = {
                             "匹配到": match_to,
                             "匹配方式": f"【{infer_tool}】"
                         }
                 else:
                     e_m = f"会话{thread_id}，节点{self.config.node_id}-{self.config.node_name}，用户log匹配流程有误"
-                    logger_chatflow.error(e_m)
+                    logger.warning(e_m)
                     user_logic_title = {
                         "匹配到": match_to
                     }
@@ -588,6 +614,13 @@ class ReplyNodeKGF:
             updated_metadata = copy.deepcopy(metadata)
         # Log information
         if self.config.enable_logging:
+            # logger.info(
+            #     "本节点最新log：%s",
+            #     "; ".join(
+            #         f"{k}:{(v[:12] + '...' if k == 'content' and isinstance(v, str) and len(v) > 12 else v)}"
+            #         for k, v in updated_logs[-1].items()
+            #     )
+            # )
             node_ending_logging(self.config, thread_id)
         return {
             "messages": current_message,
@@ -622,7 +655,7 @@ class ReplyNodeKT:
         # self.master_process_id = master_process_id
         if self.action not in {0, 1, 3}:
             e_m = f"知识库转换节点{self.config.node_id}-{self.config.node_name}执行动作无效"
-            logger_chatflow.error(e_m)
+            logger.error(e_m)
             raise ValueError(e_m)
 
         # Form a list of reply ids for this knowledge transfer node.
@@ -646,7 +679,7 @@ class ReplyNodeKT:
         #This config is the input argument config that stores thread info, different from self.config
         thread_id = config.get("configurable", {}).get("thread_id", "")
         if not thread_id:
-            logger_chatflow.error("当前会话没有thread_id")
+            logger.warning("当前会话没有thread_id")
 
         if self.config.enable_logging:
             node_starting_logging(self.config, thread_id)
@@ -719,6 +752,7 @@ class ReplyNodeKT:
             else:
                 next_state = "hang_up"
 
+        self.end_call = False
         if next_state == "hang_up":
             self.end_call = True
 
@@ -791,7 +825,7 @@ class ReplyNodeKT:
                         }
                     else:
                         e_m = f"会话{thread_id}，节点{self.config.node_id}-{self.config.node_name}，主线流程匹配方式有误"
-                        logger_chatflow.error(e_m)
+                        logger.warning(e_m)
                         user_logic_title = {
                             "匹配到": match_to,
                             "匹配到分支": f"【{last_user_log.get('branch_name', '')}】-【{last_user_log.get('intention_name', '')}】",
@@ -826,7 +860,7 @@ class ReplyNodeKT:
                         }
                     else:
                         e_m = f"会话{thread_id}，节点{self.config.node_id}-{self.config.node_name}，知识库匹配方式有误"
-                        logger_chatflow.error(e_m)
+                        logger.warning(e_m)
                         user_logic_title = {
                             "匹配到": match_to,
                             "匹配到分支": f"【{last_user_log.get('branch_name', '')}】-【{last_user_log.get('intention_name', '')}】",
@@ -834,20 +868,28 @@ class ReplyNodeKT:
                         }
                 elif match_to == "没有意图命中":
                     if infer_tool in set(infer_tool_str):
-                        user_logic_title = {
-                            "匹配到": match_to,
-                            "匹配方式": f"【{infer_tool}】"
-                        }
+                        if infer_tool == "开启nlp（问法），未使用大模型":
+                            user_logic_title = {
+                                "匹配到": match_to,
+                                "匹配方式": f"【{infer_tool}】",
+                                "最高相似度分数": last_user_log.get('matching_score', 0.0), # show the matching score so long as nlp is used
+                                "最高相似度内容": f"【{last_user_log.get('matching_content')}】",
+                            }
+                        else:
+                            user_logic_title = {
+                                "匹配到": match_to,
+                                "匹配方式": f"【{infer_tool}】",
+                            }
                     else:
                         e_m = f"会话{thread_id}，节点{self.config.node_id}-{self.config.node_name}，没有意图命中匹配配方式有误"
-                        logger_chatflow.error(e_m)
+                        logger.warning(e_m)
                         user_logic_title = {
                             "匹配到": match_to,
                             "匹配方式": f"【{infer_tool}】"
                         }
                 else:
                     e_m = f"会话{thread_id}，节点{self.config.node_id}-{self.config.node_name}，用户log匹配流程有误"
-                    logger_chatflow.error(e_m)
+                    logger.warning(e_m)
                     user_logic_title = {
                         "匹配到": match_to
                     }
@@ -899,6 +941,13 @@ class ReplyNodeKT:
         # Log information
         if self.config.enable_logging:
             if updated_logs[-1]:
+                # logger.info(
+                #     "本节点最新log：%s",
+                #     "; ".join(
+                #         f"{k}:{(v[:12] + '...' if k == 'content' and isinstance(v, str) and len(v) > 12 else v)}"
+                #         for k, v in updated_logs[-1].items()
+                #     )
+                # )
                 node_ending_logging(self.config, thread_id)
         return {
             "messages": current_message,

@@ -276,7 +276,7 @@ class ChatFlowConfig(BaseModel):
                     no_input = True
                 if int(global_config.get("context_type")) == 2:
                     no_infer_result = True
-                if int(global_config.get("context_type")) not in {1, 2}:
+                if int(global_config.get("context_type")) not in {1, 2, 3}: # we don't process 3 in this logic
                     e_m = "全局配置语境有误"
                     logger_chatflow.error(e_m)
                     raise TypeError(e_m)

@@ -92,27 +92,39 @@ class IntegratedSemanticMatcher:
         """
         return await self._match_strategy(user_input)
 
-    async def _try_match(self, matcher: SemanticMatcher, label: str, user_input:str):
-        result = await matcher.find_most_similar(user_input)
-        if result:
-            tid, tname, cont, score = result
-            if score > self.nlp_threshold:
-                return tid, tname, cont, score, label
-        return None
-
     async def _match_intention_first(self, user_input: str):
-        match = await self._try_match(self.semantic_matcher, "意图库", user_input)
-        if match:
-            return match
-        return (await self._try_match(self.knowledge_semantic_matcher, "知识库", user_input) or
-                ("", "", "", 0.0, "无"))
+        # Use semantic matcher match first
+        tid_i, tname_i, cont_i, score_i = await self.semantic_matcher.find_most_similar(user_input)
+        if score_i > self.nlp_threshold:
+            return tid_i, tname_i, cont_i, score_i, "意图库"
+        # If not successful, use knowledge matcher match
+        else:
+            tid_k, tname_k, cont_k, score_k = await self.knowledge_semantic_matcher.find_most_similar(user_input)
+            if score_k > self.nlp_threshold:
+                return tid_k, tname_k, cont_k, score_k, "知识库"
+            # If still not successful, return the result with highest score
+            else:
+                if score_i>score_k:
+                    return tid_i, tname_i, cont_i, score_i, "无"
+                else:
+                    return tid_k, tname_k, cont_k, score_k, "无"
 
     async def _match_knowledge_first(self, user_input: str):
-        match = await self._try_match(self.knowledge_semantic_matcher, "知识库", user_input)
-        if match:
-            return match
-        return (await self._try_match(self.semantic_matcher, "意图库", user_input) or
-                ("", "", "", 0.0, "无"))
+        # Use knowledge matcher match first
+        tid_k, tname_k, cont_k, score_k = await self.knowledge_semantic_matcher.find_most_similar(user_input)
+        if score_k > self.nlp_threshold:
+            return tid_k, tname_k, cont_k, score_k, "知识库"
+        # If not successful, use semantic matcher match
+        else:
+            tid_i, tname_i, cont_i, score_i = await self.semantic_matcher.find_most_similar(user_input)
+            if score_i > self.nlp_threshold:
+                return tid_i, tname_i, cont_i, score_i, "意图库"
+            # If still not successful, return the result with highest score
+            else:
+                if score_i > score_k:
+                    return tid_i, tname_i, cont_i, score_i, "无"
+                else:
+                    return tid_k, tname_k, cont_k, score_k, "无"
 
     async def _match_integrated(self, user_input: str):
         DEFAULT_RESULT = ("", "", "", 0.0)
@@ -139,22 +151,17 @@ class IntegratedSemanticMatcher:
         except asyncio.TimeoutError:
             logger_chatflow.warning("语义匹配超时（3秒）")
             intention_result = knowledge_result = DEFAULT_RESULT
-        score_i = intention_result[3] if intention_result else -1.0
-        score_k = knowledge_result[3] if knowledge_result else -1.0
 
-        # Only consider results above threshold
-        valid_i = intention_result and score_i > self.nlp_threshold
-        valid_k = knowledge_result and score_k > self.nlp_threshold
+        tid_i, tname_i, cont_i, score_i = intention_result if intention_result else DEFAULT_RESULT
+        tid_k, tname_k, cont_k, score_k = knowledge_result if knowledge_result else DEFAULT_RESULT
 
-        if not valid_i and not valid_k:
-            return "", "", "", 0.0, "无"
-
-        # Prefer higher score; in case of tie, intention wins (or adjust as needed)
-        if valid_i and (not valid_k or score_i >= score_k):
-            tid, tname, cont, score = intention_result
-            return tid, tname, cont, score, "意图库"
-        elif valid_k:
-            tid, tname, cont, score = knowledge_result
-            return tid, tname, cont, score, "知识库"
+        if score_i>score_k:
+            if score_i > self.nlp_threshold:
+                return tid_i, tname_i, cont_i, score_i, "意图库"
+            else:
+                return tid_i, tname_i, cont_i, score_i, "无"
         else:
-            return "", "", "", 0.0, "无"
+            if score_k > self.nlp_threshold:
+                return tid_k, tname_k, cont_k, score_k, "知识库"
+            else:
+                return tid_k, tname_k, cont_k, score_k, "无"
