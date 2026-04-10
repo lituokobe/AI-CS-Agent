@@ -3,7 +3,9 @@ import os
 from pathlib import Path
 from typing import Any, Literal
 from pydantic import BaseModel, Field
-from functionals.log_utils import logger_chatflow
+from common.logger import setup_logger
+
+logger = setup_logger('config_setup', category='config_setup', console_output=True)
 
 # Configuration at agent level, the params won't change across nodes
 class AgentConfig(BaseModel):
@@ -121,7 +123,7 @@ class ChatFlowConfig(BaseModel):
             for flow in knowledge_main_flow:
                 if not isinstance(flow, dict):
                     e_m = "每一个知识库主流程数据应为字典"
-                    logger_chatflow.error(e_m)
+                    logger.error(e_m)
                     raise TypeError(e_m)
                 main_flow_id = flow.get("main_flow_id")
                 if main_flow_id:
@@ -172,7 +174,7 @@ class ChatFlowConfig(BaseModel):
         for flow in chatflow_design:
             if not isinstance(flow, dict):
                 e_m = "每一个主流程数据应为字典"
-                logger_chatflow.error(e_m)
+                logger.error(e_m)
                 raise TypeError(e_m)
             sort = int(flow.get("sort"))
             main_flow_id = flow.get("main_flow_id")
@@ -183,16 +185,16 @@ class ChatFlowConfig(BaseModel):
 
             if not isinstance(main_flow_id, str) or not main_flow_id:
                 e_m = f"主流程-{main_flow_name}id应为非空字符串"
-                logger_chatflow.error(e_m)
+                logger.error(e_m)
                 raise TypeError(e_m)
             if not isinstance(starting_node_id, str) or not starting_node_id:
                 e_m = f"主流程-{main_flow_name}-{main_flow_id}的初始节点id应为非空字符串"
-                logger_chatflow.error(e_m)
+                logger.error(e_m)
                 raise TypeError(e_m)
             if not isinstance(base_nodes,
                               list):  # It can be empty list as sometimes there are no base nodes in a main flow
                 e_m = f"主流程{main_flow_id}的基础节点设置应为列表"
-                logger_chatflow.error(e_m)
+                logger.error(e_m)
                 raise TypeError(e_m)
 
             starting_node_lookup[main_flow_id] = starting_node_id
@@ -202,7 +204,7 @@ class ChatFlowConfig(BaseModel):
                 node_id = base_node.get("node_id")
                 if not isinstance(node_id, str):
                     e_m = f"主流程{main_flow_id}基础节点{node_id}的id应为字符串"
-                    logger_chatflow.error(e_m)
+                    logger.error(e_m)
                     raise TypeError(e_m)
                 mf_node_ids.add(node_id)  # Add all the base node ids from the main flows to mf_node_ids
 
@@ -214,7 +216,7 @@ class ChatFlowConfig(BaseModel):
             for flow in knowledge_main_flow:
                 if not isinstance(flow, dict):
                     e_m = "每一个知识库主流程数据应为字典"
-                    logger_chatflow.error(e_m)
+                    logger.error(e_m)
                     raise TypeError(e_m)
                 main_flow_id = flow.get("main_flow_id")
                 main_flow_content = flow.get("main_flow_content", {})
@@ -223,11 +225,11 @@ class ChatFlowConfig(BaseModel):
 
                 if not isinstance(main_flow_id, str) or not main_flow_id:
                     e_m = f"知识库主流程-{main_flow_name}id应为非空字符串"
-                    logger_chatflow.error(e_m)
+                    logger.error(e_m)
                     raise TypeError(e_m)
                 if not isinstance(starting_node_id, str) or not starting_node_id:
                     e_m = f"知识库主流程-{main_flow_name}-{main_flow_id}初始节点id应为非空字符串"
-                    logger_chatflow.error(e_m)
+                    logger.error(e_m)
                     raise TypeError(e_m)
                 starting_node_lookup[main_flow_id] = starting_node_id
                 main_flow_lookup[starting_node_id] = main_flow_id
@@ -238,13 +240,13 @@ class ChatFlowConfig(BaseModel):
         starting_main_flow_id = min(sort_lookup, key=sort_lookup.get) if sort_lookup else None
         if not isinstance(starting_main_flow_id, str):
             e_m = f"初始主流程ID必须为字符串"
-            logger_chatflow.error(e_m)
+            logger.error(e_m)
             raise TypeError(e_m)
 
         starting_node_id = starting_node_lookup.get(starting_main_flow_id, None)
         if not isinstance(starting_node_id, str):
             e_m = f"项目首个流程的初始节点ID必须为字符串"
-            logger_chatflow.error(e_m)
+            logger.error(e_m)
             raise TypeError(e_m)
 
         # Build the chatflow design context object
@@ -268,7 +270,7 @@ class ChatFlowConfig(BaseModel):
         for global_config in global_configs_raw:
             if not isinstance(global_config, dict):
                 e_m = "全局配置必须为字典"
-                logger_chatflow.error(e_m)
+                logger.error(e_m)
                 raise TypeError(e_m)
             if int(global_config.get("status")) == 1:
                 global_configs.append(global_config)
@@ -278,7 +280,7 @@ class ChatFlowConfig(BaseModel):
                     no_infer_result = True
                 if int(global_config.get("context_type")) not in {1, 2, 3}: # we don't process 3 in this logic
                     e_m = "全局配置语境有误"
-                    logger_chatflow.error(e_m)
+                    logger.error(e_m)
                     raise TypeError(e_m)
 
         global_config_context = GlobalConfigContext(

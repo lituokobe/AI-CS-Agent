@@ -5,7 +5,9 @@ from config.config_setup import NodeConfig, AgentConfig, KnowledgeContext, Chatf
 from elements.intention_node import IntentionNode
 from elements.reply_node import ReplyNode, ReplyNodeKT, ReplyNodeKGF
 from functionals.utils import update_target, next_main_flow
-from functionals.log_utils import logger_chatflow
+from common.logger import setup_logger
+
+logger = setup_logger('node_initialization', category='node_initialization', console_output=True)
 
 #TODO: factory function to create base node
 def create_base_node(
@@ -51,34 +53,37 @@ def create_base_node(
     reply_node_name = f"{node_id}_reply"
     intention_node_name = f"{node_id}_intention"
 
-    # Create sub-node instances
-    reply_node = ReplyNode(
-        config,
-        knowledge_context=knowledge_context,
-        next_node_name=intention_node_name,
-    )
-    intention_node = IntentionNode(
-        config,
-        knowledge_context=knowledge_context,
-        global_config_context=global_config_context,
-        chatflow_design_context=chatflow_design_context,
-        intentions=intentions,
-        milvus_client=milvus_client
-    )
+    try:
+        # Create sub-node instances
+        reply_node = ReplyNode(
+            config,
+            knowledge_context=knowledge_context,
+            next_node_name=intention_node_name,
+        )
+        intention_node = IntentionNode(
+            config,
+            knowledge_context=knowledge_context,
+            global_config_context=global_config_context,
+            chatflow_design_context=chatflow_design_context,
+            intentions=intentions,
+            milvus_client=milvus_client
+        )
 
-    # Add to graph
-    graph.add_node(reply_node_name, reply_node)
-    graph.add_node(intention_node_name, intention_node)
+        # Add to graph
+        graph.add_node(reply_node_name, reply_node)
+        graph.add_node(intention_node_name, intention_node)
 
-    if reply_content_info: #we stop for user to talk
-        graph.add_edge(reply_node_name, END)
-    else: #if no reply content se tup, we directly carry on to the intention node
-        graph.add_edge(reply_node_name, intention_node_name)
+        if reply_content_info: #we stop for user to talk
+            graph.add_edge(reply_node_name, END)
+        else: #if no reply content se tup, we directly carry on to the intention node
+            graph.add_edge(reply_node_name, intention_node_name)
 
-    if enable_logging:
-        log_info = (f"普通节点创立 - 主流程ID：{main_flow_id} - 主流程名称：{main_flow_name} - "
-                    f"节点ID：{node_id} - 节点名称：{node_name}")
-        logger_chatflow.info("系统消息：%s", log_info)
+        if enable_logging:
+            log_info = (f"普通节点创立 - 主流程ID：{main_flow_id} - 主流程名称：{main_flow_name} - "
+                        f"节点ID：{node_id} - 节点名称：{node_name}")
+            logger.info("系统消息：%s", log_info)
+    except Exception as e:
+        logger.error(f"普通节点{node_id}-{node_name}创建失败: {e}")
 
 #TODO: factory function to create transfer node
 def create_transfer_node(
@@ -112,7 +117,7 @@ def create_transfer_node(
     # Identify the next node
     if action not in {1,2,3}:
         e_m = f"转换节点{node_id}-{node_name}执行动作无效"
-        logger_chatflow.error(e_m)
+        logger.error(e_m)
         raise ValueError(e_m)
     if action == 1: # 挂断
         transfer_node_id = "hang_up"
@@ -121,7 +126,7 @@ def create_transfer_node(
         if next_main_flow_id: # If there is a next main flow
             transfer_node_id = update_target(next_main_flow_id, starting_node_lookup)
         else:
-            logger_chatflow.info(f"节点{node_id}-{node_name}无下一主线流程。对话进行至此后将挂断。")
+            logger.info(f"节点{node_id}-{node_name}无下一主线流程。对话进行至此后将挂断。")
             transfer_node_id = "hang_up"
     elif action == 3: # 跳转指定主线流程
         transfer_node_id = update_target(transfer_node_id, starting_node_lookup)
@@ -150,7 +155,7 @@ def create_transfer_node(
     if enable_logging:
         log_info = (f"转换节点创立 - 主流程ID：{main_flow_id} - 主流程名称：{main_flow_name} "
                     f"- 节点ID：{node_id} - 节点名称：{node_name}")
-        logger_chatflow.info("系统消息：%s", log_info)
+        logger.info("系统消息：%s", log_info)
 
 #TODO: factory function to create knowledge transfer node
 #Knowledge has a separate transfer node creation function because its action is different.
@@ -203,7 +208,7 @@ def create_knowledge_transfer_node(
     if enable_logging:
         log_info = (f"知识库转换节点创立 - 主流程ID：{main_flow_id} - 主流程名称：{main_flow_name} "
                     f"- 节点ID：{node_id} - 节点名称：{node_name}")
-        logger_chatflow.info("系统消息：%s", log_info)
+        logger.info("系统消息：%s", log_info)
 
 #TODO: factory function to create knowledge reply node
 def create_knowledge_reply_node(
@@ -219,7 +224,7 @@ def create_knowledge_reply_node(
     answer_list: list = knowledge_info.get("answer", [])
     if not answer_list:
         e_m = f"流程创建失败：知识库{node_id}-{node_name}没有设定回答话术"
-        logger_chatflow.error(e_m)
+        logger.error(e_m)
         raise ValueError(e_m)
     enable_logging: bool = knowledge_info.get("enable_logging", False)
     main_flow_id = "knowledge"
@@ -250,7 +255,7 @@ def create_knowledge_reply_node(
     if enable_logging:
         log_info = (f"知识库节点创立 - 主流程ID：{main_flow_id} - 主流程名称：{main_flow_name} "
                     f"- 节点ID：{node_id} - 节点名称：{node_name}")
-        logger_chatflow.info("系统消息：%s", log_info)
+        logger.info("系统消息：%s", log_info)
 
 #TODO: factory function to create global config reply node
 def create_global_reply_node(
@@ -268,7 +273,7 @@ def create_global_reply_node(
         node_name = "AI未识别"
     else:
         e_m = "全局配置目前仅支持‘1-客户无应答’和‘2-AI未识别’"
-        logger_chatflow.error(e_m)
+        logger.error(e_m)
         raise ValueError(e_m)
 
     answer_list: list = global_config.get("answer", [])
@@ -301,4 +306,4 @@ def create_global_reply_node(
     if enable_logging:
         log_info = (f"全局配置节点创立 - 主流程ID：{main_flow_id} - 主流程名称：{main_flow_name} "
                     f"- 节点ID：{node_id} - 节点名称：{node_name}")
-        logger_chatflow.info("系统消息：%s", log_info)
+        logger.info("系统消息：%s", log_info)

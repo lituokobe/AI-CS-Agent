@@ -4,8 +4,9 @@ import time
 import asyncio
 from pymilvus import MilvusClient, AsyncMilvusClient, MilvusException
 from pymilvus.milvus_client import IndexParams
-from functionals.log_utils import logger_chatflow
+from common.logger import setup_logger
 from functionals.embedding_functions import embed_query
+logger = setup_logger('milvus', category='milvus', console_output=True)
 
 #TODO: sync Milvus client
 class LaunchMilvus:
@@ -28,10 +29,10 @@ class LaunchMilvus:
         if not self.client.has_collection(self.collection_name):
             self._create_collection()
             self._create_hnsw_index()
-            logger_chatflow.info(f"已创建新的collection：{self.collection_name}和HNSW index")
+            logger.info(f"已创建新的collection：{self.collection_name}和HNSW index")
         else:
             self._ensure_hnsw_index()
-            logger_chatflow.info(f"Collection：{self.collection_name}已存在，使用已有的HNSW index")
+            logger.info(f"Collection：{self.collection_name}已存在，使用已有的HNSW index")
 
         # Always upsert latest data
         if merged_data:
@@ -55,7 +56,7 @@ class LaunchMilvus:
                 {"name": "phrase", "data_type": "VARCHAR", "max_length": 4096},
             ]
         )
-        logger_chatflow.info(f"已创建向量数据库collection：{self.collection_name}")
+        logger.info(f"已创建向量数据库collection：{self.collection_name}")
 
     def _create_hnsw_index(self):
         """Create HNSW index - called only once when collection is created."""
@@ -66,9 +67,9 @@ class LaunchMilvus:
                 try:
                     self.client.release_collection(self.collection_name)
                     self.client.drop_index(self.collection_name, index_name)
-                    logger_chatflow.info(f"向量数据库collection：{self.collection_name}已删除现有index：{index_name}")
+                    logger.info(f"向量数据库collection：{self.collection_name}已删除现有index：{index_name}")
                 except Exception as e:
-                    logger_chatflow.warning(f"向量数据库collection：{self.collection_name}删除index{index_name}时发生警告：{str(e)}")
+                    logger.warning(f"向量数据库collection：{self.collection_name}删除index{index_name}时发生警告：{str(e)}")
             # Create HNSW index
             index_params = IndexParams()
             index_params.add_index(
@@ -81,9 +82,9 @@ class LaunchMilvus:
                 collection_name=self.collection_name,
                 index_params=index_params
             )
-            logger_chatflow.info(f"向量数据库collection：{self.collection_name}已创建向量数据库HNSW index")
+            logger.info(f"向量数据库collection：{self.collection_name}已创建向量数据库HNSW index")
         except MilvusException as e:
-            logger_chatflow.error(f"向量数据库collection：{self.collection_name}创建HNSW index时发生错误：{str(e)}")
+            logger.error(f"向量数据库collection：{self.collection_name}创建HNSW index时发生错误：{str(e)}")
             raise RuntimeError(str(e))
 
     def _ensure_hnsw_index(self):
@@ -105,18 +106,18 @@ class LaunchMilvus:
                     if (index_info.get('index_type') == 'HNSW' and
                             index_info.get('metric_type') == 'COSINE'):
                         hnsw_exists = True
-                        logger_chatflow.info(f"向量数据库collection：{self.collection_name}HNSW index已存在，index名称为{index_name}")
+                        logger.info(f"向量数据库collection：{self.collection_name}HNSW index已存在，index名称为{index_name}")
                         break
                 except Exception as e:
-                    logger_chatflow.warning(f"向量数据库collection：{self.collection_name}检查index{index_name}时发生警告: {str(e)}")
+                    logger.warning(f"向量数据库collection：{self.collection_name}检查index{index_name}时发生警告: {str(e)}")
 
             if not hnsw_exists:
                 # Existing index is not HNSW, replace it
-                logger_chatflow.info(f"向量数据库collection：{self.collection_name}现有index不是HNSW类型，替换为HNSW")
+                logger.info(f"向量数据库collection：{self.collection_name}现有index不是HNSW类型，替换为HNSW")
                 self._create_hnsw_index()
 
         except Exception as e:
-            logger_chatflow.error(f"向量数据库collection：{self.collection_name}检查HNSW index时发生错误：{str(e)}")
+            logger.error(f"向量数据库collection：{self.collection_name}检查HNSW index时发生错误：{str(e)}")
             raise RuntimeError(str(e))
 
     def _upsert_intention_data(self, merged_data: list):
@@ -133,7 +134,7 @@ class LaunchMilvus:
                         embedding = embedding.tolist()
                     if len(embedding)!=self.dimension:
                         e_m = f"向量数据库collection：{self.collection_name}向量为度应为{self.dimension}，目前为{len(embedding)}"
-                        logger_chatflow.error(e_m)
+                        logger.error(e_m)
                         raise ValueError(e_m)
 
                     phrase_id = self._generate_phrase_id(intention_id, phrase)
@@ -146,12 +147,12 @@ class LaunchMilvus:
                     })
 
         if not upsert_data:
-            logger_chatflow.info(f"没有问法短语插入向向量数据库collection：{self.collection_name}")
+            logger.info(f"没有问法短语插入向向量数据库collection：{self.collection_name}")
             return
 
         # Upsert (insert or replace)
         self.client.upsert(collection_name=self.collection_name, data=upsert_data)
-        logger_chatflow.info(f"更新{len(upsert_data)}条问法短语到向量数据库collection：{self.collection_name}")
+        logger.info(f"更新{len(upsert_data)}条问法短语到向量数据库collection：{self.collection_name}")
 
     def get_index_info(self):
         """Get information about current index."""
@@ -166,7 +167,7 @@ class LaunchMilvus:
                 })
             return index_info_list
         except Exception as e:
-            logger_chatflow.error(f"向量数据库collection：{self.collection_name}获取index信息时发生错误：{str(e)}")
+            logger.error(f"向量数据库collection：{self.collection_name}获取index信息时发生错误：{str(e)}")
             return []
 
 #TODO: async Milvus client
@@ -202,38 +203,38 @@ class LaunchMilvusAsync:
     async def ensure_collection_ready(self):
         """Ensure collection exists and is ready with data."""
         start_time = time.time()
-        logger_chatflow.info(f"开始处理向量数据库collection：{self.collection_name}")
+        logger.info(f"开始处理向量数据库collection：{self.collection_name}")
 
         # if collection doesn't exist, create it.
         try:
             has_collection = await self.client.has_collection(self.collection_name, timeout=20.0)  # AWAIT
         except asyncio.TimeoutError:
-            logger_chatflow.error(f"向量数据库collection：{self.collection_name} 连接超时 (20秒)")
+            logger.error(f"向量数据库collection：{self.collection_name} 连接超时 (20秒)")
         except Exception as e:
-            logger_chatflow.error(f"查询向量数据库collection：{self.collection_name} 是否存在失败: {str(e)}")
+            logger.error(f"查询向量数据库collection：{self.collection_name} 是否存在失败: {str(e)}")
             return None
 
         if not has_collection:
             await self._create_collection()
             await self._create_hnsw_index()
-            logger_chatflow.info(f"已创建新的向量数据库collection：{self.collection_name}和其HNSW index")
+            logger.info(f"已创建新的向量数据库collection：{self.collection_name}和其HNSW index")
             try:
                 await self.client.load_collection(self.collection_name, timeout=30)
-                logger_chatflow.info(f"向量数据库collection：{self.collection_name}已加载到内存")
+                logger.info(f"向量数据库collection：{self.collection_name}已加载到内存")
             except Exception as e:
-                logger_chatflow.warning(f"加载向量数据库collection：{self.collection_name}失败，尝试继续：{str(e)}")
+                logger.warning(f"加载向量数据库collection：{self.collection_name}失败，尝试继续：{str(e)}")
             # insert latest data
             if self.merged_data:
                 await self._insert_all_data(self.merged_data)
         else:
             await self._ensure_hnsw_index()
-            logger_chatflow.info(f"向量数据库collection：{self.collection_name}已存在，使用已有的HNSW index")
+            logger.info(f"向量数据库collection：{self.collection_name}已存在，使用已有的HNSW index")
             # load collection before query
             try:
                 await self.client.load_collection(self.collection_name, timeout=30)
-                logger_chatflow.info(f"向量数据库collection：{self.collection_name}已加载到内存")
+                logger.info(f"向量数据库collection：{self.collection_name}已加载到内存")
             except Exception as e:
-                logger_chatflow.warning(f"向量数据库collection：{self.collection_name}失败，尝试继续：{str(e)}")
+                logger.warning(f"向量数据库collection：{self.collection_name}失败，尝试继续：{str(e)}")
             # update with latest data
             if self.merged_data:
                 await self._incremental_sync_data(self.merged_data)
@@ -242,7 +243,7 @@ class LaunchMilvusAsync:
         # await self.cleanup_duplicate_phrases()
 
         elapsed = time.time() - start_time
-        logger_chatflow.info(f"向量数据库collection: {self.collection_name}处理完成，耗时：{elapsed:.3f}秒")
+        logger.info(f"向量数据库collection: {self.collection_name}处理完成，耗时：{elapsed:.3f}秒")
 
     async def _create_collection(self):
         """Create the Milvus collection schema."""
@@ -259,7 +260,7 @@ class LaunchMilvusAsync:
                 {"name": "phrase", "data_type": "VARCHAR", "max_length": 4096},
             ]
         )
-        logger_chatflow.info(f"已创建向量数据库collection：{self.collection_name}")
+        logger.info(f"已创建向量数据库collection：{self.collection_name}")
 
     async def _create_hnsw_index(self):
         """Create HNSW index - called only once when collection is created."""
@@ -270,9 +271,9 @@ class LaunchMilvusAsync:
                 try:
                     await self.client.release_collection(self.collection_name)
                     await self.client.drop_index(self.collection_name, index_name)
-                    logger_chatflow.info(f"向量数据库collection：{self.collection_name}已删除现有index：{index_name}")
+                    logger.info(f"向量数据库collection：{self.collection_name}已删除现有index：{index_name}")
                 except Exception as e:
-                    logger_chatflow.warning(f"向量数据库collection：{self.collection_name}删除index {index_name}时发生警告：{str(e)}")
+                    logger.warning(f"向量数据库collection：{self.collection_name}删除index {index_name}时发生警告：{str(e)}")
             # Create HNSW index
             index_params = IndexParams()
             index_params.add_index(
@@ -285,9 +286,9 @@ class LaunchMilvusAsync:
                 collection_name=self.collection_name,
                 index_params=index_params
             )
-            logger_chatflow.info(f"已创建向量数据库collection：{self.collection_name}的HNSW index")
+            logger.info(f"已创建向量数据库collection：{self.collection_name}的HNSW index")
         except MilvusException as e:
-            logger_chatflow.info(f"创建向量数据库collection：{self.collection_name} HNSW index时发生错误：{str(e)}")
+            logger.info(f"创建向量数据库collection：{self.collection_name} HNSW index时发生错误：{str(e)}")
             raise RuntimeError(str(e))
 
     async def _ensure_hnsw_index(self):
@@ -302,17 +303,17 @@ class LaunchMilvusAsync:
                     index_info = await self.client.describe_index(self.collection_name, index_name)
                     if (index_info.get('index_type') == 'HNSW' and index_info.get('metric_type') == 'COSINE'):
                         hnsw_exists = True
-                        logger_chatflow.info(f"向量数据库collection：{self.collection_name} HNSW index已存在，索引名称为{index_name}")
+                        logger.info(f"向量数据库collection：{self.collection_name} HNSW index已存在，索引名称为{index_name}")
                         break
                 except Exception as e:
-                    logger_chatflow.warning(f"向量数据库collection：{self.collection_name}检查索引{index_name}时发生警告：{str(e)}")
+                    logger.warning(f"向量数据库collection：{self.collection_name}检查索引{index_name}时发生警告：{str(e)}")
 
             if not hnsw_exists:
-                logger_chatflow.info(f"向量数据库collection：{self.collection_name}现有索引不是HNSW类型，替换为HNSW")
+                logger.info(f"向量数据库collection：{self.collection_name}现有索引不是HNSW类型，替换为HNSW")
                 await self._create_hnsw_index()
 
         except Exception as e:
-            logger_chatflow.error(f"向量数据库collection：{self.collection_name}检查HNSW索引时发生错误：{str(e)}")
+            logger.error(f"向量数据库collection：{self.collection_name}检查HNSW索引时发生错误：{str(e)}")
             raise RuntimeError(str(e))
 
     async def _get_existing_phrase_ids_with_retry(self, max_retries: int = 3) -> set[int]:
@@ -321,11 +322,11 @@ class LaunchMilvusAsync:
             try:
                 return await self._get_existing_phrase_ids()
             except Exception as e:
-                logger_chatflow.warning(f"向量数据库collection：{self.collection_name}获取现有ID失败 (尝试 {attempt + 1}/{max_retries})：{e}")
+                logger.warning(f"向量数据库collection：{self.collection_name}获取现有ID失败 (尝试 {attempt + 1}/{max_retries})：{e}")
                 if attempt < max_retries - 1:
                     await asyncio.sleep(2 ** attempt)  # 指数退避
                 else:
-                    logger_chatflow.error(f"向量数据库collection：{self.collection_name}获取现有ID最终失败：{e}")
+                    logger.error(f"向量数据库collection：{self.collection_name}获取现有ID最终失败：{e}")
                     raise
         return set()
 
@@ -353,7 +354,7 @@ class LaunchMilvusAsync:
                 offset += self.limit
             return existing_ids
         except Exception as e:
-            logger_chatflow.warning(f"无法获取现有向量数据库collection：{self.collection_name} phrase_id列表：{e}")
+            logger.warning(f"无法获取现有向量数据库collection：{self.collection_name} phrase_id列表：{e}")
             return set()
 
     async def _prepare_target_data(self, merged_data: list[dict]) -> tuple[set[int], dict[int, dict]]:
@@ -375,34 +376,34 @@ class LaunchMilvusAsync:
                     "phrase": phrase,
                 }
 
-        logger_chatflow.info(f"向量数据库collection：{self.collection_name}目标数据包含{len(target_phrase_ids)}条短语")
+        logger.info(f"向量数据库collection：{self.collection_name}目标数据包含{len(target_phrase_ids)}条短语")
         return target_phrase_ids, phrase_id_to_data
 
     async def _incremental_sync_data(self, merged_data: list[dict]):
         """Incrementally sync data: insert new, delete obsolete."""
         try:
-            logger_chatflow.info(f"向量数据库collection：{self.collection_name}开始增量同步数据...")
+            logger.info(f"向量数据库collection：{self.collection_name}开始增量同步数据...")
             target_phrase_ids, phrase_id_to_data = await self._prepare_target_data(merged_data)
             existing_phrase_ids = await self._get_existing_phrase_ids_with_retry()
-            logger_chatflow.info(f"向量数据库collection：{self.collection_name}现有数据包含{len(existing_phrase_ids)}条短语")
+            logger.info(f"向量数据库collection：{self.collection_name}现有数据包含{len(existing_phrase_ids)}条短语")
 
             to_delete = existing_phrase_ids - target_phrase_ids
             to_insert = target_phrase_ids - existing_phrase_ids
 
             if to_delete:
-                logger_chatflow.info(f"向量数据库collection：{self.collection_name}删除{len(to_delete)}条过期问法短语")
+                logger.info(f"向量数据库collection：{self.collection_name}删除{len(to_delete)}条过期问法短语")
                 await self._batch_delete_phrases(list(to_delete))
 
             if to_insert:
-                logger_chatflow.info(f"向量数据库collection：{self.collection_name}插入{len(to_insert)}条新问法短语")
+                logger.info(f"向量数据库collection：{self.collection_name}插入{len(to_insert)}条新问法短语")
                 await self._batch_insert_phrases(to_insert, phrase_id_to_data)
             else:
-                logger_chatflow.info(f"向量数据库collection：{self.collection_name}问法短语已同步，无需更新")
+                logger.info(f"向量数据库collection：{self.collection_name}问法短语已同步，无需更新")
 
             self._log_sync_stats(len(existing_phrase_ids), len(to_delete), len(to_insert), len(target_phrase_ids))
 
         except Exception as e:
-            logger_chatflow.error(f"向量数据库collection：{self.collection_name}更新失败：{str(e)}")
+            logger.error(f"向量数据库collection：{self.collection_name}更新失败：{str(e)}")
             raise
 
     async def _batch_delete_phrases(self, phrase_ids: list[int], batch_size: int = 1000):
@@ -412,16 +413,16 @@ class LaunchMilvusAsync:
         try:
             if len(phrase_ids)<=batch_size: # Try in one go for small amount deletion
                 await self.client.delete(collection_name=self.collection_name, ids=phrase_ids)
-                logger_chatflow.info(f"向量数据库collection：{self.collection_name}一次性删除{len(phrase_ids)}条短语")
+                logger.info(f"向量数据库collection：{self.collection_name}一次性删除{len(phrase_ids)}条短语")
             else: # Delete in batches for large amount
                 for i in range(0, len(phrase_ids), batch_size):
                     batch = phrase_ids[i:i + batch_size]
                     await self.client.delete(collection_name=self.collection_name, ids=batch)
-                    logger_chatflow.info(f"向量数据库collection：{self.collection_name}正在分批删除，已删除批次 {i // batch_size + 1}: {len(batch)} 条")
+                    logger.info(f"向量数据库collection：{self.collection_name}正在分批删除，已删除批次 {i // batch_size + 1}: {len(batch)} 条")
                     await asyncio.sleep(0.01)  # Delay a bit to reduce server pressure
-                logger_chatflow.info(f"向量数据库collection：{self.collection_name}分批删除完成，共{len(phrase_ids)}条")
+                logger.info(f"向量数据库collection：{self.collection_name}分批删除完成，共{len(phrase_ids)}条")
         except Exception as e:
-            logger_chatflow.warning(f"向量数据库collection：{self.collection_name}删除失败，尝试降级方案：{str(e)}")
+            logger.warning(f"向量数据库collection：{self.collection_name}删除失败，尝试降级方案：{str(e)}")
             await self._delete_with_filter_fallback(phrase_ids)
 
     async def _delete_with_filter_fallback(self, phrase_ids: list[int]):
@@ -433,7 +434,7 @@ class LaunchMilvusAsync:
                 filter=filter_expr
             )
         except Exception as e:
-            logger_chatflow.error(f"向量数据库collection：{self.collection_name} filter删除也失败，尝试逐个删除：{str(e)}")
+            logger.error(f"向量数据库collection：{self.collection_name} filter删除也失败，尝试逐个删除：{str(e)}")
             # Delete one by one
             success_count = 0
             for pid in phrase_ids:
@@ -444,8 +445,8 @@ class LaunchMilvusAsync:
                     )
                     success_count += 1
                 except Exception:
-                    logger_chatflow.warning(f"向量数据库collection：{self.collection_name}无法删除phrase_id {pid}")
-            logger_chatflow.info(f"向量数据库collection：{self.collection_name}逐个删除完成：{success_count}/{len(phrase_ids)}成功")
+                    logger.warning(f"向量数据库collection：{self.collection_name}无法删除phrase_id {pid}")
+            logger.info(f"向量数据库collection：{self.collection_name}逐个删除完成：{success_count}/{len(phrase_ids)}成功")
 
     async def _batch_insert_phrases(self, phrase_ids_to_insert: set[int], phrase_id_to_data: dict[int, dict]):
         """Batch insert phrases with cached embedding."""
@@ -461,9 +462,9 @@ class LaunchMilvusAsync:
             if batch_data:
                 try:
                     await self.client.insert(collection_name=self.collection_name, data=batch_data)
-                    logger_chatflow.debug(f"向量数据库collection：{self.collection_name}已插入批次 {i // batch_size + 1}: {len(batch_data)} 条")
+                    logger.debug(f"向量数据库collection：{self.collection_name}已插入批次 {i // batch_size + 1}: {len(batch_data)} 条")
                 except Exception as e:
-                    logger_chatflow.error(f"向量数据库collection：{self.collection_name}批次插入失败：{str(e)}")
+                    logger.error(f"向量数据库collection：{self.collection_name}批次插入失败：{str(e)}")
             await asyncio.sleep(0)  # yield control
 
     async def _prepare_insert_batch_with_concurrency(
@@ -518,7 +519,7 @@ class LaunchMilvusAsync:
                         if hasattr(embedding, 'tolist'):
                             embedding = embedding.tolist()
                         if len(embedding) != self.dimension:
-                            logger_chatflow.error(f"向量数据库collection：{self.collection_name}向量维度错误: {len(embedding)}，跳过：{phrase_text[:50]}...")
+                            logger.error(f"向量数据库collection：{self.collection_name}向量维度错误: {len(embedding)}，跳过：{phrase_text[:50]}...")
                             return None
                         self.embedding_cache[cache_key] = embedding
                         self._stats["embeddings_generated"] += 1
@@ -531,12 +532,12 @@ class LaunchMilvusAsync:
                     "phrase": phrase_text
                 }
             except Exception as e:
-                logger_chatflow.error(f"向量数据库collection：{self.collection_name}嵌入处理短语失败 '{phrase_text[:50]}...': {e}")
+                logger.error(f"向量数据库collection：{self.collection_name}嵌入处理短语失败 '{phrase_text[:50]}...': {e}")
                 return None
 
     async def _insert_all_data(self, merged_data: list[dict]):
         """Insert all data on first-time collection creation."""
-        logger_chatflow.info(f"向量数据库collection：{self.collection_name}开始初始数据插入...")
+        logger.info(f"向量数据库collection：{self.collection_name}开始初始数据插入...")
         all_items = []
         for item in merged_data:
             intention_id = item.get("intention_id")
@@ -558,10 +559,10 @@ class LaunchMilvusAsync:
             insert_batch = await self._prepare_insert_batch_with_concurrency(list(data_map.keys()), data_map, self.embedding_semaphore)
             if insert_batch:
                 await self.client.insert(collection_name=self.collection_name, data=insert_batch)
-                logger_chatflow.debug(f"向量数据库collection：{self.collection_name}初始插入批次{i // batch_size + 1}: {len(insert_batch)}条")
+                logger.debug(f"向量数据库collection：{self.collection_name}初始插入批次{i // batch_size + 1}: {len(insert_batch)}条")
             await asyncio.sleep(0)
 
-        logger_chatflow.info(f"向量数据库collection：{self.collection_name}初始数据插入完成，共 {len(all_items)}条短语")
+        logger.info(f"向量数据库collection：{self.collection_name}初始数据插入完成，共 {len(all_items)}条短语")
 
     def _log_sync_stats(self, existing_count: int, deleted_count: int, inserted_count: int, final_count: int):
         """Log sync statistics."""
@@ -571,7 +572,7 @@ class LaunchMilvusAsync:
         if total_embeddings > 0:
             cache_hit_rate = self._stats["embeddings_cached"] / total_embeddings * 100
 
-        logger_chatflow.info(
+        logger.info(
             f"向量数据库collection：{self.collection_name}更新数据同步统计:\n"
             f"  原有记录: {existing_count}\n"
             f"  删除记录: {deleted_count}\n"
@@ -597,7 +598,7 @@ class LaunchMilvusAsync:
                 for index_name in existing_indexes
             ]
         except Exception as e:
-            logger_chatflow.error(f"获取index信息时发生错误：{e}")
+            logger.error(f"获取index信息时发生错误：{e}")
             return []
 
     async def cleanup_duplicate_phrases(self):
@@ -622,7 +623,7 @@ class LaunchMilvusAsync:
                 offset += self.limit
 
             if not all_data:
-                logger_chatflow.info(f"向量数据库collection：{self.collection_name}为空，无需检查重复记录")
+                logger.info(f"向量数据库collection：{self.collection_name}为空，无需检查重复记录")
                 return
 
             # find duplicates
@@ -637,17 +638,17 @@ class LaunchMilvusAsync:
                     seen[key] = item['id']
 
             if duplicates:
-                logger_chatflow.info(f"向量数据库collection：{self.collection_name}发现{len(duplicates)}条重复记录，正在清理...")
+                logger.info(f"向量数据库collection：{self.collection_name}发现{len(duplicates)}条重复记录，正在清理...")
                 await self.client.delete(
                     collection_name=self.collection_name,
                     ids=duplicates
                 )
-                logger_chatflow.info(f"向量数据库collection：{self.collection_name}已清理{len(duplicates)}条重复记录")
+                logger.info(f"向量数据库collection：{self.collection_name}已清理{len(duplicates)}条重复记录")
             else:
-                logger_chatflow.info(f"向量数据库collection：{self.collection_name}未发现重复记录")
+                logger.info(f"向量数据库collection：{self.collection_name}未发现重复记录")
 
         except Exception as e:
-            logger_chatflow.error(f"向量数据库collection：{self.collection_name}清理重复数据失败: {str(e)}")
+            logger.error(f"向量数据库collection：{self.collection_name}清理重复数据失败: {str(e)}")
 
 async def initialize_milvus_async(
         vector_db_url: str,

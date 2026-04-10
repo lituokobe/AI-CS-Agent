@@ -31,7 +31,6 @@ venv/
 ENV/
 env.bak/
 venv.bak/
-.venv
 
 # IDE 和编辑器
 .vscode/

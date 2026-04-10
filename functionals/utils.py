@@ -1,6 +1,8 @@
 import copy
 from config.config_setup import NodeConfig
-from functionals.log_utils import logger_chatflow
+from common.logger import setup_logger
+
+logger = setup_logger('utils', category='utils', console_output=True)
 
 # Retrieve the last message from the user in the stack of messages
 def get_last_user_message(messages: list) -> str:
@@ -42,7 +44,7 @@ def str_dict_select(str_dict: dict, ids: list[str] | None) -> dict:
                 missing.append(_id)
         if missing:
             e_m = f"以下意图id不存在：{missing}"
-            logger_chatflow.error(e_m)
+            logger.error(e_m)
             raise ValueError(e_m)
     return filtered
 
@@ -71,7 +73,7 @@ def intention_filter(intentions: list, ids: set | None) -> list[dict]:
     missing = [i for i in ids if i not in intention_map]
     if missing:
         e_m = f"以下意图id不存在：{missing}"
-        logger_chatflow.error(e_m)
+        logger.error(e_m)
         raise ValueError(e_m)
 
     # Build filtered list in the same order as input IDs
@@ -89,20 +91,20 @@ def process_reply(content_info_dict:dict, user_input: str):
     if variate: # There are dynamic variates
         if not isinstance(variate, dict):
             e_m = f"variate应为字典"
-            logger_chatflow.error(e_m)
+            logger.error(e_m)
             raise TypeError(e_m)
         for k, v in variate.items():
             if not isinstance(k, str):
                 e_m = f"{k}应为字符串"
-                logger_chatflow.error(e_m)
+                logger.error(e_m)
                 raise TypeError(e_m)
             if not k in content:
                 e_m = f"{content}中不含有variate的键{k}"
-                logger_chatflow.error(e_m)
+                logger.error(e_m)
                 raise TypeError(e_m)
             if not isinstance(v, dict):
                 e_m = f"{v}应为字典"
-                logger_chatflow.error(e_m)
+                logger.error(e_m)
                 raise TypeError(e_m)
 
             # Process the variate
@@ -116,7 +118,7 @@ def process_reply(content_info_dict:dict, user_input: str):
                     reply_content = reply_content.replace(k, user_input)
                 else:
                     e_m = f"{v}中的dynamic_var_set_type的值有误"
-                    logger_chatflow.error(e_m)
+                    logger.error(e_m)
                     raise ValueError(e_m)
     return dialog_id, content, variate, reply_content
 
@@ -138,15 +140,15 @@ def next_main_flow(main_flow_id:str, sort_lookup:dict) -> str|None:
     """
     if not main_flow_id:
         e_m = f"当前流程ID为空"
-        logger_chatflow.error(e_m)
+        logger.error(e_m)
 
     if not sort_lookup:
         e_m = f"主流程顺序表有误"
-        logger_chatflow.error(e_m)
+        logger.error(e_m)
 
     if main_flow_id not in sort_lookup:
         e_m = f"当前流程{main_flow_id}不在设计内"
-        logger_chatflow.error(e_m)
+        logger.error(e_m)
 
     current_order = sort_lookup.get(main_flow_id)
     candidate_flows = {
@@ -166,7 +168,7 @@ def next_main_flow(main_flow_id:str, sort_lookup:dict) -> str|None:
 def get_last_user_log_index(logs: list):
     if not isinstance(logs, list):
         e_m = f"logs应该为列表，不是 {type(logs).__name__}"
-        logger_chatflow.error(e_m)
+        logger.error(e_m)
 
     for i in range(len(logs)-1, -1, -1):
         if isinstance(logs[i], dict) and logs[i].get("role") == "user":
@@ -187,10 +189,10 @@ def get_logs_from_last_user(logs:list):
 
 # Node starting/ending work logging
 def node_starting_logging(config: NodeConfig, thread_id: str):
-    logger_chatflow.info("系统消息：%s", f"会话{thread_id}，节点{config.node_id}-{config.node_name}，开始工作")
+    logger.info("系统消息：%s", f"会话{thread_id}，节点{config.node_id}-{config.node_name}，开始工作")
 
 def node_ending_logging(config:NodeConfig, thread_id: str, time_cost: float|None = None):
     if time_cost is not None:
-        logger_chatflow.info("系统消息：%s", f"会话{thread_id}，节点{config.node_id}-{config.node_name}，完成工作，耗时{time_cost}秒")
+        logger.info("系统消息：%s", f"会话{thread_id}，节点{config.node_id}-{config.node_name}，完成工作，耗时{time_cost}秒")
     else:
-        logger_chatflow.info("系统消息：%s", f"会话{thread_id}，节点{config.node_id}-{config.node_name}，完成工作")
+        logger.info("系统消息：%s", f"会话{thread_id}，节点{config.node_id}-{config.node_name}，完成工作")

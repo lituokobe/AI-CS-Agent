@@ -1,9 +1,11 @@
 from langgraph.constants import END
 from langgraph.graph import StateGraph
 from config.config_setup import ChatflowDesignContext, KnowledgeContext
-from functionals.log_utils import logger_chatflow
+from common.logger import setup_logger
 from functionals.state import ChatState
 from functionals.utils import update_target
+
+logger = setup_logger('edge_initialization', category='edge_initialization', console_output=True)
 
 #TODO: factory function to create router and conditional edges for regular main flows
 def create_edges(
@@ -49,7 +51,7 @@ def create_edges(
     if enable_logging:
         log_info = (f"普通节点条件边创立 - 主流程ID：{main_flow_id} - 主流程名称：{main_flow_name} "
                     f"- 节点ID：{node_id} - 节点名称：{node_name}")
-        logger_chatflow.info("系统消息：%s", log_info)
+        logger.info("系统消息：%s", log_info)
 
 #TODO: factory function to create router and conditional edges for knowledge
 def create_knowledge_edges(
@@ -82,7 +84,7 @@ def create_knowledge_edges(
     if enable_logging:
         log_info = (f"知识库回复节点条件边创立 - 主流程ID：{main_flow_id} - 主流程名称：{main_flow_name} "
                     f"- 节点ID：{node_id} - 节点名称：{node_name} - ")
-        logger_chatflow.info("系统消息：%s", log_info)
+        logger.info("系统消息：%s", log_info)
 
 #TODO: factory function to create router and conditional edges for knowledge transfer nodes
 #These are not edges inside the knowledge main flow, it the edges after the knowledge transfer nodes
@@ -118,7 +120,7 @@ def create_knowledge_transfer_edges(
     if enable_logging:
         log_info = (f"知识库转换节点条件边创立 - 主流程ID：{main_flow_id} - 主流程名称：{main_flow_name} "
                     f"- 节点ID：{node_id} - 节点名称：{node_name} - ")
-        logger_chatflow.info("系统消息：%s", log_info)
+        logger.info("系统消息：%s", log_info)
 
 #TODO: factory function to create router and conditional edges for global configs
 def create_global_edges(
@@ -135,7 +137,7 @@ def create_global_edges(
         node_name = "AI未识别"
     else:
         e_m = "全局配置目前仅支持‘1-客户无应答’和‘2-AI未识别’"
-        logger_chatflow.error(e_m)
+        logger.error(e_m)
         raise ValueError(e_m)
 
     enable_logging: bool = global_config.get("enable_logging", False)
@@ -161,4 +163,4 @@ def create_global_edges(
     if enable_logging:
         log_info = (f"全局配置节点条件边创立 - 主流程ID：{main_flow_id} - 主流程名称：{main_flow_name} "
                     f"- 节点ID：{node_id} - 节点名称：{node_name}")
-        logger_chatflow.info("系统消息：%s", log_info)
+        logger.info("系统消息：%s", log_info)

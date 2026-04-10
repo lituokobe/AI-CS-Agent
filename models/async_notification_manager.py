@@ -4,8 +4,9 @@ import threading
 import queue
 from concurrent.futures import ThreadPoolExecutor
 import time
-import json
-from functionals.log_utils import logger_chatflow
+from common.logger import setup_logger
+
+logger = setup_logger('async_notification_manager', category='async_notification_manager', console_output=True)
 
 
 # 在 DynamicModelManager 类中添加异步通知机制
@@ -36,7 +37,7 @@ class AsyncNotificationManager:
                 except queue.Empty:
                     continue
                 except Exception as e:
-                    logger_chatflow.error(f"异步通知工作线程异常: {str(e)}")
+                    logger.error(f"异步通知工作线程异常: {str(e)}")
 
         # 启动多个工作线程
         for i in range(3):
@@ -51,22 +52,22 @@ class AsyncNotificationManager:
             response_time = (time.time() - start_time) * 1000
 
             if response.status_code == 200:
-                logger_chatflow.info(f"📤 异步通知成功 - 类型: {task_type}, 耗时: {response_time:.1f}ms")
+                logger.info(f"📤 异步通知成功 - 类型: {task_type}, 耗时: {response_time:.1f}ms")
             else:
-                logger_chatflow.error(f"❌ 异步通知失败 - 类型: {task_type}, 状态码: {response.status_code}")
+                logger.error(f"❌ 异步通知失败 - 类型: {task_type}, 状态码: {response.status_code}")
 
         except requests.exceptions.RequestException as e:
-            logger_chatflow.error(f"🔌 异步通知请求失败 - 类型: {task_type}, 错误: {str(e)}")
+            logger.error(f"🔌 异步通知请求失败 - 类型: {task_type}, 错误: {str(e)}")
         except Exception as e:
-            logger_chatflow.error(f"🚨 异步通知异常 - 类型: {task_type}, 错误: {str(e)}")
+            logger.error(f"🚨 异步通知异常 - 类型: {task_type}, 错误: {str(e)}")
 
     def add_notification(self, url, payload, task_type):
         """添加通知任务到队列"""
         try:
             self.task_queue.put((url, payload, task_type), timeout=0.1)
-            logger_chatflow.debug(f"📝 添加异步通知任务 - 类型: {task_type}")
+            logger.debug(f"📝 添加异步通知任务 - 类型: {task_type}")
         except queue.Full:
-            logger_chatflow.warning(f"⚠️ 通知队列已满，丢弃任务 - 类型: {task_type}")
+            logger.warning(f"⚠️ 通知队列已满，丢弃任务 - 类型: {task_type}")
 
     def shutdown(self):
         """关闭通知管理器"""

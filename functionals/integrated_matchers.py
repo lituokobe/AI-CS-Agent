@@ -1,7 +1,8 @@
 import asyncio
-
-from functionals.log_utils import logger_chatflow
+from common.logger import setup_logger
 from functionals.matchers import KeywordMatcher, SemanticMatcher
+
+logger = setup_logger('integrated_matcher', category='integrated_matcher', console_output=True)
 
 # Combine the intention keyword matcher and the knowledge keyword matcher based on user's preference of intention_priority
 class IntegratedKeywordsMatcher:
@@ -19,7 +20,7 @@ class IntegratedKeywordsMatcher:
             self._match_strategy = self._match_integrated
         else:
             e_m = "优先选择仅能为‘1-知识库优先’，‘2-回答分支优先’或‘3-智能匹配优先’"
-            logger_chatflow.error(e_m)
+            logger.error(e_m)
             raise ValueError(e_m)
 
     def match(self, user_input:str):
@@ -30,7 +31,8 @@ class IntegratedKeywordsMatcher:
         return self._match_strategy(user_input)
 
     # Define a function to match the user input with inference type output
-    def _try_match(self, matcher: KeywordMatcher, inference_label: str, user_input: str):
+    @staticmethod
+    def _try_match(matcher: KeywordMatcher, inference_label: str, user_input: str):
         result = matcher.analyze_sentence(user_input)
         if result:
             type_id, type_name, keywords, count = matcher.get_primary_type(result)
@@ -82,7 +84,7 @@ class IntegratedSemanticMatcher:
             self._match_strategy = self._match_integrated
         else:
             e_m = "优先选择仅能为‘1-知识库优先’，‘2-回答分支优先’或‘3-智能匹配优先’"
-            logger_chatflow.error(e_m)
+            logger.error(e_m)
             raise ValueError(e_m)
 
     async def match(self, user_input: str):
@@ -142,14 +144,14 @@ class IntegratedSemanticMatcher:
 
             # Normalize exceptions to default result
             if isinstance(intention_result, Exception):
-                logger_chatflow.error(f"意图库语义匹配异常: {intention_result}")
+                logger.error(f"意图库语义匹配异常: {intention_result}")
                 intention_result = DEFAULT_RESULT
             if isinstance(knowledge_result, Exception):
-                logger_chatflow.error(f"知识库语义匹配异常: {knowledge_result}")
+                logger.error(f"知识库语义匹配异常: {knowledge_result}")
                 knowledge_result = DEFAULT_RESULT
 
         except asyncio.TimeoutError:
-            logger_chatflow.warning("语义匹配超时（3秒）")
+            logger.warning("语义匹配超时（3秒）")
             intention_result = knowledge_result = DEFAULT_RESULT
 
         tid_i, tname_i, cont_i, score_i = intention_result if intention_result else DEFAULT_RESULT

@@ -43,7 +43,7 @@ services:
       - ./persistence:/app/persistence:rw
       - ./models:/app/models:rw
 
-    working_dir: /app
+    working_dir: /app #optional, as WORKDIR is already specified in Dockerfile
     healthcheck:
       test: ["CMD", "sh", "-c", "curl -f http://127.0.0.1:5001/gateway/health"]
       interval: 30s

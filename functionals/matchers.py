@@ -1,6 +1,6 @@
 from typing import Any
 import re
-from functionals.log_utils import logger_chatflow
+from common.logger import setup_logger
 from config.config_setup import NodeConfig
 
 # Keyword approach
@@ -15,6 +15,8 @@ from models.llm_models import qwen_turbo, qwen_flash, qwen_max, deepseek_llm, gl
 from data.string_asset import docstring_base_raw, priority_map, docstring_tail
 from langchain_core.messages import HumanMessage
 import ast
+
+logger = setup_logger('matchers', category='matchers', console_output=True)
 
 """
 3 type of matchers:
@@ -133,7 +135,7 @@ class KeywordMatcher:
     def get_primary_type(result: dict[str | None, dict[str, Any] | None]) -> tuple[str, str, list[str], int]:
         if not result:
             e_m = "输入的关键词查询结果为空"
-            logger_chatflow.error(e_m)
+            logger.error(e_m)
             return "others", "", [], 0
 
         primary_id = max(result.keys(), key=lambda k: result[k]['count'])
@@ -194,7 +196,7 @@ class SemanticMatcher:
                 entity.get("phrase", ""), hit.get("distance", 0.0))
 
         except Exception as e:
-            logger_chatflow.error(f"'{sentence}'查询失败: {str(e)}", exc_info=True)
+            logger.error(f"'{sentence}'查询失败: {str(e)}", exc_info=True)
             # Final fallback
             return DEFAULT_RESULT
 
@@ -219,7 +221,7 @@ class LLMInferenceMatcher:
         nomatch_knowledge_ids = self.config.other_config.get("nomatch_knowledge_ids", [])
         if not isinstance(nomatch_knowledge_ids, list):
             e_m = f"{config.node_id}-{config.node_name}节点nomatch_knowledge_ids应为列表"
-            logger_chatflow.error(e_m)
+            logger.error(e_m)
             raise TypeError(e_m)
         self.knowledge_infer_name = {k:v for k, v in knowledge_infer_name.items() if k not in nomatch_knowledge_ids} # dict to store knowledge intention_id: intention_name
         self.knowledge_infer_description = {k:v for k, v in knowledge_infer_description.items() if k in self.knowledge_infer_name} # dict to store knowledge intention_id : intention_name - intention_description
@@ -306,7 +308,7 @@ class LLMInferenceMatcher:
             else:
                 summary, id_ = "无", "others"
         except Exception as e:
-            logger_chatflow.error("大模型输出解析异常：%s", {e})
+            logger.error("大模型输出解析异常：%s", {e})
             # Fallback: extract using regex
             summary_match = re.search(r'[\'"`]input_summary[\'"`]\s*:\s*[\'"`](.*?)[\'"`]', text)
             summary = summary_match.group(1)[:10] if summary_match else "无"
@@ -322,7 +324,7 @@ class LLMInferenceMatcher:
         """
         if not self.llm_runnable:
             e_m = "LLM推理工具未初始化"
-            logger_chatflow.error(e_m)
+            logger.error(e_m)
 
         # Initialize default values
         intention_id, user_intention, input_summary, inference_type, token_used = (
@@ -358,7 +360,7 @@ class LLMInferenceMatcher:
             token_used = int(resp.response_metadata.get("token_usage", {}).get("total_tokens", 0))
             input_summary, intention_id = self._parse_llm_json_output(resp.content)
         except Exception as e:
-            logger_chatflow.error("LLM推理调用异常：%s", {e})
+            logger.error("LLM推理调用异常：%s", {e})
 
         if intention_id in self.intention_infer_name:
             user_intention = self.intention_infer_name[intention_id]

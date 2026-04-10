@@ -6,10 +6,12 @@ from config.config_setup import NodeConfig, KnowledgeContext, GlobalConfigContex
 from data.string_asset import infer_tool_str, no_next_main_flow_hang_up_str
 from functionals.matchers import KeywordMatcher, SemanticMatcher, LLMInferenceMatcher
 from functionals.integrated_matchers import IntegratedSemanticMatcher, IntegratedKeywordsMatcher
-from functionals.log_utils import logger_chatflow
+from common.logger import setup_logger
 from functionals.state import ChatState
 from functionals.utils import get_last_user_message, intention_filter, next_main_flow, node_starting_logging, \
     node_ending_logging, get_logs_from_last_user
+
+logger = setup_logger('intention_node', category='intention_node', console_output=True)
 
 #TODO: The class of the intention node
 class IntentionNode:
@@ -68,7 +70,7 @@ class IntentionNode:
         nomatch_knowledge_ids = self.config.other_config.get("nomatch_knowledge_ids", [])
         if not isinstance(nomatch_knowledge_ids, list):
             e_m = f"节点{self.config.node_id}-{self.config.node_name}的nomatch_knowledge_ids应为列表"
-            logger_chatflow.error(e_m)
+            logger.error(e_m)
 
         # Initialize matchers
         # Consider the knowledge that is configured not to match in this node
@@ -135,7 +137,7 @@ class IntentionNode:
         #This config is the input argument config that stores thread info, different from self.config
         thread_id = config.get("configurable", {}).get("thread_id", "")
         if not thread_id:
-            logger_chatflow.error("当前会话没有thread_id")
+            logger.error("当前会话没有thread_id")
 
         if self.config.enable_logging:
             node_starting_logging(self.config, thread_id)
@@ -258,7 +260,7 @@ class IntentionNode:
                     # Process according to current match balance
                     if not isinstance(knowledge_match_balance.get(type_id), int):
                         e_m = f"会话{thread_id}，节点{self.config.node_id}-{self.config.node_name}，{type_id}不在知识库中"
-                        logger_chatflow.error(e_m)
+                        logger.error(e_m)
                     # When there IS remaining balance for the knowledge
                     if knowledge_match_balance[type_id] > 0:
                         next_state = type_id  # Navigate to the knowledge reply sub-node
@@ -306,7 +308,7 @@ class IntentionNode:
                     }
                 else:
                     e_m = f"会话{thread_id}，节点{self.config.node_id}-{self.config.node_name}，意图没有来自意图库或知识库"
-                    logger_chatflow.error(e_m)
+                    logger.error(e_m)
                     log_info = {
                         **previous_log,
                         "role": "user",
@@ -426,7 +428,7 @@ class IntentionNode:
                 # Process according to current match balance
                 if not isinstance(knowledge_match_balance.get(type_id), int):
                     e_m = f"会话{thread_id}，节点{self.config.node_id}-{self.config.node_name}，{type_id}不在知识库中"
-                    logger_chatflow.error(e_m)
+                    logger.error(e_m)
                 if knowledge_match_balance[type_id] > 0:
                     next_state = type_id  # Navigate to the knowledge reply sub-node
                     knowledge_match_balance[type_id] -= 1
@@ -528,7 +530,7 @@ class IntentionNode:
                     # Process according to current match balance
                     if not isinstance(knowledge_match_balance.get(type_id), int):
                         e_m = f"会话{thread_id}，节点{self.config.node_id}-{self.config.node_name}，{type_id}不在知识库中"
-                        logger_chatflow.error(e_m)
+                        logger.error(e_m)
                         match_to = "知识库"
                     else:
                         if knowledge_match_balance[type_id] > 0:
@@ -653,7 +655,7 @@ class IntentionNode:
             e_m = (f"会话{thread_id}，节点{self.config.node_id}-{self.config.node_name}，"
                    f"用户没有输入或意图无法判断。"
                    f"请在本节点或全局配置并设置以应对此种情况。")
-            logger_chatflow.error(e_m)
+            logger.error(e_m)
             # Switch to next main flow, until hang_up
             # Get the nearest main_flow_id that is not from knowledge,
             # It can be current main_flow_id or last main_flow_id if we are in a knowledge intention node
@@ -666,7 +668,7 @@ class IntentionNode:
             current_main_flow_id = self.main_flow_lookup.get(current_starting_node_id, "")
             next_main_flow_id = next_main_flow(current_main_flow_id, self.sort_lookup)
             if not next_main_flow_id:  # If there is a next main flow
-                logger_chatflow.info(f"会话{thread_id}，节点{self.config.node_id}-{self.config.node_name}，无下一主线流程。对话进行至此后将挂断。")
+                logger.info(f"会话{thread_id}，节点{self.config.node_id}-{self.config.node_name}，无下一主线流程。对话进行至此后将挂断。")
             next_state = next_main_flow_id or "hang_up"
 
         updated_logs = logs + [log_info]

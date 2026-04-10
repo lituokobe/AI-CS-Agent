@@ -32,13 +32,15 @@ from data.simulated_data_lt_simplified import (
     global_configs,
     intentions,
 )
-from functionals.log_utils import logger_chatflow
+from common.logger import setup_logger
 from models.async_notification_manager import AsyncNotificationManager
 from models.persistence_manager import ModelPersistenceManager
 
 # ASGI server imports (Hypercorn)
 from hypercorn.config import Config
 from hypercorn.asyncio import serve
+
+logger = setup_logger('ai_service', category='ai_service', console_output=True)
 
 # TODO: Start the app
 app = Quart(__name__)
@@ -49,6 +51,7 @@ PHP_CALLBACK_URL = settings.PHP_CALLBACK_URL  # PHP回调地址
 class DynamicModelManager:
     def __init__(self):
         self.models = {}  # {model_id: model_data}
+        self.activating_model = {}
         self.model_usage = defaultdict(int)  # 模型使用计数
         self.model_last_used = {}  # 模型最后使用时间
         self.model_tasks = defaultdict(set)  # 模型关联的任务
@@ -67,6 +70,10 @@ class DynamicModelManager:
         self.cleanup_interval = 300
         self.model_memory_estimate = 100  # 🎯 每个模型预估内存占用(MB)
 
+        # Version tracking for cancellation (per model_id)
+        self._init_versions: dict[str, int] = {}
+        self._init_locks: dict[str, asyncio.Lock] = {}
+
     def start_cleanup_task(self):
         """启动后台清理线程"""
         async def cleanup_worker():
@@ -76,19 +83,20 @@ class DynamicModelManager:
                     # 🎯 先检查是否需要紧急清理
                     emergency_result = await self.check_and_cleanup_if_needed()
                     if emergency_result.get('cleaned', False):
-                        logger_chatflow.debug(f"🔄 紧急清理完成: {emergency_result}")
+                        logger.debug(f"🔄 紧急清理完成: {emergency_result}")
 
                     # 🎯 然后进行常规清理
                     normal_result = await self.cleanup_idle_models()  # 正常清理
                     if normal_result['removed_count'] > 0:
-                        logger_chatflow.debug(f"🔄 常规清理完成: 移除了 {normal_result['removed_count']} 个模型")
+                        logger.debug(f"🔄 常规清理完成: 移除了 {normal_result['removed_count']} 个模型")
 
                 except Exception as e:
-                    logger_chatflow.error(f"清理线程异常: {str(e)}")
+                    logger.error(f"清理线程异常: {str(e)}")
 
         asyncio.create_task(cleanup_worker())
 
-    def _notify_php_model_activated(self, model_id):
+    @staticmethod
+    def _notify_php_model_activated(model_id):
         """异步通知PHP模型激活"""
         try:
             payload = {
@@ -102,11 +110,12 @@ class DynamicModelManager:
                 daemon=True
             )
             thread.start()
-            logger_chatflow.info(f"📤 异步通知PHP模型激活: {model_id}")
+            logger.info(f"📤 异步通知PHP模型激活: {model_id}")
         except Exception as e:
-            logger_chatflow.error(f"❌ 异步通知PHP模型激活失败: {str(e)}")
+            logger.error(f"❌ 异步通知PHP模型激活失败: {str(e)}")
 
-    def _notify_php_model_activation_failed(self, model_id, error_msg):
+    @staticmethod
+    def _notify_php_model_activation_failed(model_id, error_msg):
         """通知PHP模型激活失败"""
         try:
             payload = {
@@ -121,9 +130,9 @@ class DynamicModelManager:
                 daemon=True
             )
             thread.start()
-            logger_chatflow.info(f"📤 通知PHP模型激活失败: {model_id}, 原因: {error_msg}")
+            logger.info(f"📤 通知PHP模型激活失败: {model_id}, 原因: {error_msg}")
         except Exception as e:
-            logger_chatflow.error(f"❌ 通知PHP模型激活失败失败: {str(e)}")
+            logger.error(f"❌ 通知PHP模型激活失败失败: {str(e)}")
 
     def _notify_php_model_sleep(self, model_id):
         """异步通知PHP模型休眠"""
@@ -139,7 +148,8 @@ class DynamicModelManager:
             "model_sleep"
         )
 
-    def notify_php_task_pause(self, task_id, model_id, reason):
+    @staticmethod
+    def notify_php_task_pause(task_id, model_id, reason):
         """异步通知PHP暂停任务"""
         try:
             payload = {
@@ -155,14 +165,33 @@ class DynamicModelManager:
                 daemon=True
             )
             thread.start()
-            logger_chatflow.warning(f"📤 异步通知PHP暂停任务: {task_id}, 原因: {reason}")
+            logger.warning(f"📤 异步通知PHP暂停任务: {task_id}, 原因: {reason}")
         except Exception as e:
-            logger_chatflow.error(f"❌ 异步通知PHP暂停任务失败: {str(e)}")
+            logger.error(f"❌ 异步通知PHP暂停任务失败: {str(e)}")
 
+    @staticmethod
+    def _notify_php_model_activating(model_id, reason):
+        """异步通知PHP模型激活"""
+        try:
+            payload = {
+                'model_id': model_id,
+                'status': 'activating',
+                'reason': reason,
+                'timestamp': datetime.now().isoformat()
+            }
+            # 使用异步线程
+            thread = threading.Thread(
+                target=lambda: requests.post(f"{PHP_CALLBACK_URL}", json=payload, timeout=3),
+                daemon=True
+            )
+            thread.start()
+            logger.info(f"📤 异步通知PHP模型激活: {model_id}")
+        except Exception as e:
+            logger.error(f"❌ 异步通知PHP模型激活失败: {str(e)}")
 
     async def recover_models_on_startup(self):
         """服务启动时恢复模型 - 简化版本"""
-        logger_chatflow.info("🔄 开始恢复持久化的模型...")
+        logger.info("🔄 开始恢复持久化的模型...")
 
         # 加载模型配置
         model_configs = self.persistence_manager.load_model_configs()
@@ -176,7 +205,7 @@ class DynamicModelManager:
                 expire_time = config_data.get('expire_time', 0)
 
                 if current_time > expire_time:
-                    logger_chatflow.info(f"🗑️ 跳过过期模型并删除配置: {model_id}")
+                    logger.info(f"🗑️ 跳过过期模型并删除配置: {model_id}")
                     self.persistence_manager.delete_model_config(model_id)
                     expired_count += 1
                     continue
@@ -198,7 +227,7 @@ class DynamicModelManager:
                 redis_checkpointer = AsyncRedisSaver(redis_client=redis_client)
                 await redis_checkpointer.setup()  # Async setup
                 chatflow, milvus_client = await build_chatflow(chatflow_config, redis_checkpointer=redis_checkpointer)
-                logger_chatflow.info("✅ build_chatflow completed!")
+                logger.info("✅ build_chatflow completed!")
                 # 恢复模型数据
                 self.models[model_id] = {
                     'instance': chatflow,
@@ -206,7 +235,8 @@ class DynamicModelManager:
                     'created_time': config_data.get('created_time', datetime.now()),
                     'expire_time': expire_time,
                     'memory_usage': config_data.get('memory_usage', 0),
-                    'status': 'recovered'
+                    'status': 'recovered',
+                    'version': 0,
                 }
 
                 # 恢复使用统计（重置为0，因为服务重启）
@@ -215,40 +245,116 @@ class DynamicModelManager:
                 self.model_created_time[model_id] = config_data.get('created_time', datetime.now())
 
                 recovered_count += 1
-                logger_chatflow.info(f"✅ 恢复模型成功: {model_id}")
+                logger.info(f"✅ 恢复模型成功: {model_id}")
 
             except Exception as e:
-                logger_chatflow.error(f"❌ 恢复模型失败 {model_id}: {str(e)}")
+                logger.error(f"❌ 恢复模型失败 {model_id}: {str(e)}")
                 continue
 
-        logger_chatflow.info(f"🎉 模型恢复完成: 成功 {recovered_count} 个, 过期 {expired_count} 个")
+        logger.info(f"🎉 模型恢复完成: 成功 {recovered_count} 个, 过期 {expired_count} 个")
+
+    @staticmethod
+    async def _safe_close_client(client):
+        """Safely close a client, handling both sync and async close methods"""
+        if not client:
+            return
+        try:
+            # Prefer aclose for async clients
+            if hasattr(client, 'aclose') and callable(client.aclose):
+                result = client.aclose()
+                if asyncio.iscoroutine(result):
+                    await result
+            # Fallback to close (which might also be async)
+            elif hasattr(client, 'close') and callable(client.close):
+                result = client.close()
+                if asyncio.iscoroutine(result):
+                    await result
+        except Exception as e:
+            # Log at debug level to avoid spam; these are best-effort cleanups
+            logger.debug(f"⚠️ 关闭客户端警告: {type(client).__name__}: {e}")
 
     async def initialize_model(self, model_id, config_data=None, task_id=None, expire_time=None):
-        """动态初始化模型"""
+        """
+        动态初始化模型，支持:
+        - 重复请求时取消前一次请求 (version cancellation)
+        - 3分钟冷却期防止频繁重初始化 (cooldown)
+        - 线程安全的共享状态管理
+        """
+        # ============================================================
+        # 🎯 STEP 0: Cooldown Check (protected by sync lock)
+        # ============================================================
         with self.lock:
-            # 检查是否已达模型上限
-            if len(self.models) >= self.max_models:
-                # 尝试清理空闲模型
-                await self.cleanup_idle_models(force_reason='count_exceed')
-                if len(self.models) >= self.max_models:
-                    error_msg = f"模型数量已达上限 {self.max_models}，无法创建新模型"
-                    self._notify_php_model_activation_failed(model_id, error_msg)
+            # 如果请求距离上一次在3分钟内，直接报错
+            now = time.time()
+            if model_id in self.activating_model:
+                elapsed = now - self.activating_model[model_id]
+                if elapsed < 180:  # 3分钟内
+                    error_msg = f"模型 {model_id} 正在激活中（已进行 {elapsed:.1f} 秒），拒绝重复激活"
+                    logger.info(error_msg)
+                    self._notify_php_model_activating(model_id, error_msg)
                     raise Exception(error_msg)
+                else:
+                    # 超时，允许重新激活，删除旧记录
+                    logger.info(f"模型 {model_id} 激活超时（{elapsed:.1f} 秒），重新激活")
+                    del self.activating_model[model_id]
+            # 记录新激活的开始时间
+            self.activating_model[model_id] = now
 
-            # 如果模型已存在，增加使用计数
-            if model_id in self.models:
-                self.model_usage[model_id] += 1
-                if task_id:
-                    self.model_tasks[model_id].add(task_id)
-                if expire_time:
-                    self.models[model_id]['expire_time'] = expire_time
-                logger_chatflow.info(f"模型 {model_id} 已存在，增加使用计数: {self.model_usage[model_id]}")
-                # 通知PHP模型激活
-                self._notify_php_model_activated(model_id)
-                return True
+        # ============================================================
+        # 🎯 STEP 1: Per-Model Async Lock (serialize init for this model_id)
+        # ============================================================
+        if model_id not in self._init_locks:
+            self._init_locks[model_id] = asyncio.Lock()
 
+        async with self._init_locks[model_id]:
+            # 🎯 Increment version: newer request supersedes older
+            current_version = self._init_versions.get(model_id, 0) + 1
+            self._init_versions[model_id] = current_version
+
+            # 🎯 Clean up any partial state from previous attempt
+            await self._cleanup_partial_init(model_id)
+
+            # --------------------------------------------------------
+            # 🎯 STEP 2: Quick Checks (protected by sync lock)
+            # --------------------------------------------------------
+            with self.lock:
+                # 检查是否已达模型上限
+                if len(self.models) >= self.max_models:
+                    # 尝试清理空闲模型
+                    await self.cleanup_idle_models(force_reason='count_exceed')
+                    if len(self.models) >= self.max_models:
+                        error_msg = f"模型数量已达上限 {self.max_models}，无法创建新模型"
+                        self._notify_php_model_activation_failed(model_id, error_msg)
+                        raise Exception(error_msg)
+
+                # 如果模型已存在，增加使用计数
+                if model_id in self.models and 'instance' in self.models[model_id]:
+                    self.model_usage[model_id] += 1
+                    if task_id:
+                        self.model_tasks[model_id].add(task_id)
+                    if expire_time:
+                        self.models[model_id]['expire_time'] = expire_time
+                    logger.info(f"模型 {model_id} 已存在，增加使用计数: {self.model_usage[model_id]}")
+                    # 通知PHP模型激活
+                    self._notify_php_model_activated(model_id)
+                    return True
+
+                # 🎯 Mark as 'initializing' (temporary state)
+                self.models[model_id] = {
+                    'status': 'initializing',
+                    'version': current_version,
+                    'created_time': datetime.now(),  # ✅ Required by get_model_status()
+                    'expire_time': expire_time or (time.time() + 14 * 24 * 3600),  # ✅ Safe default
+                    'memory_usage': 0,  # ✅ Placeholder, won't break stats
+                    'config': config_data or {},  # ✅ Already available at this point
+                }
+
+            # --------------------------------------------------------
+            # 🎯 STEP 3: Heavy Work (NO LOCKS HELD - allows concurrency)
+            # --------------------------------------------------------
+            redis_client = milvus_client = None
             try:
-                logger_chatflow.info(f"开始动态初始化模型: {model_id}")
+                logger.info(f"开始动态初始化模型: {model_id}(v{current_version})")
 
                 # 构建配置
                 chatflow_config = self._build_chatflow_config(config_data)
@@ -264,30 +370,67 @@ class DynamicModelManager:
                 )
                 redis_checkpointer = AsyncRedisSaver(redis_client=redis_client)
                 await redis_checkpointer.setup()  # Async setup
-                
+
                 chatflow, milvus_client = await build_chatflow(chatflow_config, redis_checkpointer=redis_checkpointer)
-                
+
+                # --------------------------------------------------------
+                # 🎯 STEP 4: Post-Execution Version Check (cancellation point)
+                # --------------------------------------------------------
+                with self.lock:
+                    existing = self.models.get(model_id)
+
+                    # Case 1: Version mismatch + still initializing → safe to clean up
+                    if existing and existing.get('status') == 'initializing' and existing.get(
+                            'version') != current_version:
+                        logger.info(f"⏭️ {model_id} v{current_version} 已被取代，跳过提交")
+                        # Cleanup local resources (milvus_client, redis_client are in scope)
+                        for client in [milvus_client, redis_client]:
+                            if client:
+                                try:
+                                    await self._safe_close_client(client)
+                                    logger.debug(f"🧹 模型 {model_id} 清理 {type(client).__name__}")
+                                except Exception as cleanup_err:
+                                    logger.debug(f"⚠️ 忽略清理错误: {cleanup_err}")
+                        self.models.pop(model_id, None)
+                        return True
+
+                    # Case 2: Newer request already committed → just cleanup local resources, don't touch dict
+                    elif existing and existing.get('status') == 'active':
+                        logger.debug(f"⏭️ {model_id} v{current_version}: 新请求已提交，仅清理本地资源")
+                        for client in [milvus_client, redis_client]:
+                            if client:
+                                try:
+                                    await self._safe_close_client(client)
+                                except Exception as cleanup_err:
+                                    logger.debug(f"⚠️ 忽略清理错误: {cleanup_err}")
+                        return True  # Newer request already handled it
+
+                # --------------------------------------------------------
+                # 🎯 STEP 5: Commit Successful Initialization
+                # --------------------------------------------------------
                 # 存储模型实例
                 current_time = datetime.now()
-                self.models[model_id] = {
-                    'instance': chatflow,
-                    'milvus_client': milvus_client,
-                    'redis_client': redis_client,
-                    'config': config_data or {},
-                    'created_time': current_time,
-                    'expire_time': expire_time or (time.time() + 14 * 24 * 3600),
-                    'memory_usage': self._get_memory_usage(),
-                    'status': 'active'
-                }
-                self.model_usage[model_id] = 0  # 🎯 修改：新模型初始计数为0
-                self.model_last_used[model_id] = current_time
-                self.model_created_time[model_id] = current_time
+                with self.lock:
+                    self.models[model_id] = {
+                        'instance': chatflow,
+                        'milvus_client': milvus_client,
+                        'redis_client': redis_client,
+                        'config': config_data or {},
+                        'created_time': current_time,
+                        'expire_time': expire_time or (time.time() + 14 * 24 * 3600),
+                        'memory_usage': self._get_memory_usage(),
+                        'status': 'active',
+                        'version': current_version
+                    }
+                    self.model_usage[model_id] = 0  # 🎯 修改：新模型初始计数为0
+                    self.model_last_used[model_id] = current_time
+                    self.model_created_time[model_id] = current_time
 
-                if task_id:
-                    self.model_tasks[model_id].add(task_id)
-                    self.model_usage[model_id] += 1  # 🎯 如果有task_id，才增加计数
+                    if task_id:
+                        self.model_tasks[model_id].add(task_id)
+                        self.model_usage[model_id] += 1  # 🎯 如果有task_id，才增加计数
 
-                logger_chatflow.info(f"模型 {model_id} 动态初始化成功，当前模型总数: {len(self.models)}")
+                    logger.info(f"模型 {model_id} 动态初始化成功，当前模型总数: {len(self.models)}")
 
                 # 🎯 持久化模型配置
                 model_persist_data = {
@@ -304,16 +447,57 @@ class DynamicModelManager:
                 self._notify_php_model_activated(model_id)
                 return True
 
+            # --------------------------------------------------------
+            # 🎯 STEP 6: Error Handling & Cleanup
+            # --------------------------------------------------------
             except Exception as e:
-                logger_chatflow.error(f"模型 {model_id} 动态初始化失败: {str(e)}")
-                # 清理可能的部分初始化
-                if model_id in self.models:
-                    del self.models[model_id]
-                if model_id in self.model_usage:
-                    del self.model_usage[model_id]
+                logger.error(f"模型 {model_id} 动态初始化失败(v{current_version}): {str(e)}")
+                # 🎯 CRITICAL: Clean up local client variables that may have been created
+                for client in [milvus_client, redis_client]:  # These are local vars from try block
+                    if client:
+                        try:
+                            await self._safe_close_client(client)
+                            logger.debug(f"🧹 模型 {model_id} 异常清理 {type(client).__name__}")
+                        except Exception as cleanup_err:
+                            logger.warning(f"⚠️ 模型 {model_id} 异常清理客户端失败: {cleanup_err}")
+
+                # 🎯 FIX: Remove nested async lock — we're already holding _init_locks[model_id]!
+                # _cleanup_partial_init only uses self.lock (threading.RLock), which is safe here
+                await self._cleanup_partial_init(model_id)
+
+                # Clean up tracking dicts (original logic)
+                with self.lock:
+                    self.model_usage.pop(model_id, None)
+                    self.model_last_used.pop(model_id, None)
+                    self.model_tasks.pop(model_id, None)
+                    self.model_created_time.pop(model_id, None)
                 # 通知PHP激活失败
                 self._notify_php_model_activation_failed(model_id, str(e))
                 raise
+
+            finally:
+                # 无论成功或失败，删除激活标记
+                if model_id in self.activating_model:
+                    del self.activating_model[model_id]
+                    logger.info(f"模型 {model_id} 删除激活标记")
+
+    async def _cleanup_partial_init(self, model_id: str):
+        """Clean up partial state if initialization was interrupted"""
+        with self.lock:
+            if model_id in self.models and self.models[model_id].get('status') == 'initializing':
+                model_data = self.models[model_id]
+                # Close external connections safely
+                for client_name in ['milvus_client', 'redis_client']:
+                    client = model_data.get(client_name)
+                    if client:
+                        try:
+                            await self._safe_close_client(client)
+                            logger.debug(f"🧹 模型 {model_id} 清除 {client_name} ")
+                        except Exception as e:
+                            logger.warning(f"⚠️ 模型 {model_id} 清除 {client_name}失败: {e}")
+                # Remove temporary state
+                self.models.pop(model_id, None)
+                logger.info(f"🗑️ 模型 {model_id} 启动中状态清除")
 
     def get_model(self, model_id, task_id=None):
         """获取模型实例，更新使用时间"""
@@ -321,7 +505,7 @@ class DynamicModelManager:
             if model_id in self.models:
                 # 检查模型是否过期
                 if self._check_model_expired(model_id):
-                    logger_chatflow.warning(f"模型 {model_id} 已过期")
+                    logger.warning(f"模型 {model_id} 已过期")
                     # 通知PHP模型休眠    这步和下面的 暂停并重新激活重复 notify_php_task_pause
                     # self._notify_php_model_sleep(model_id)
                     return None
@@ -347,7 +531,7 @@ class DynamicModelManager:
         with self.lock:
             if model_id in self.models:
                 self.models[model_id]['expire_time'] = expire_time
-                logger_chatflow.info(f"模型 {model_id} 过期时间已延长至: {expire_time}")
+                logger.info(f"模型 {model_id} 过期时间已延长至: {expire_time}")
                 return True
             return False
 
@@ -361,7 +545,7 @@ class DynamicModelManager:
                 if task_id and task_id in self.model_tasks[model_id]:
                     self.model_tasks[model_id].remove(task_id)
 
-                logger_chatflow.info(f"释放模型 {model_id} 使用计数，当前: {self.model_usage[model_id]}")
+                logger.info(f"释放模型 {model_id} 使用计数，当前: {self.model_usage[model_id]}")
 
     async def destroy_model(self, model_id, force=False):
         """销毁模型实例"""
@@ -371,7 +555,7 @@ class DynamicModelManager:
 
             # 检查是否还有任务在使用
             if not force and self.model_usage[model_id] > 0:
-                logger_chatflow.warning(f"模型 {model_id} 仍有 {self.model_usage[model_id]} 个任务在使用，无法销毁")
+                logger.warning(f"模型 {model_id} 仍有 {self.model_usage[model_id]} 个任务在使用，无法销毁")
                 return False
 
             try:
@@ -382,18 +566,18 @@ class DynamicModelManager:
                 # Close Milvus
                 if milvus_client:
                     try:
-                        await milvus_client.close()
-                        logger_chatflow.info(f"✅ Milvus client closed for model {model_id}")
+                        await self._safe_close_client(milvus_client)
+                        logger.info(f"✅ Milvus client closed for model {model_id}")
                     except Exception as e:
-                        logger_chatflow.error(f"❌ Failed to close Milvus client for {model_id}: {e}")
+                        logger.error(f"❌ Failed to close Milvus client for {model_id}: {e}")
 
                 # Close Redis
                 if redis_client:
                     try:
-                        await redis_client.aclose()
-                        logger_chatflow.info(f"✅ Redis client closed for model {model_id}")
+                        await self._safe_close_client(redis_client)
+                        logger.info(f"✅ Redis client closed for model {model_id}")
                     except Exception as e:
-                        logger_chatflow.error(f"❌ Failed to close Redis client for {model_id}: {e}")
+                        logger.error(f"❌ Failed to close Redis client for {model_id}: {e}")
 
                 # 从管理器中移除
                 del self.models[model_id]
@@ -407,49 +591,61 @@ class DynamicModelManager:
                 # 🎯 删除持久化配置（会自动清理旧备份）
                 self.persistence_manager.delete_model_config(model_id)
 
-                logger_chatflow.info(f"模型 {model_id} 已销毁，剩余模型数: {len(self.models)}")
+                logger.info(f"模型 {model_id} 已销毁，剩余模型数: {len(self.models)}")
 
                 # 通知PHP模型休眠
                 self._notify_php_model_sleep(model_id)
+
+                self._init_versions.pop(model_id, None)
+                self._init_locks.pop(model_id, None)
+
                 return True
 
             except Exception as e:
-                logger_chatflow.error(f"销毁模型 {model_id} 失败: {str(e)}")
+                logger.error(f"销毁模型 {model_id} 失败: {str(e)}")
                 return False
 
-    def again_model(self, model_id):
+    async def again_model(self, model_id):
         """重启模型实例"""
+        # 🎯 Step 1: Extract model data under lock (minimize lock hold time)
         with self.lock:
             if model_id not in self.models:
                 return True
 
             # 检查是否还有任务在使用
             print(self.model_usage[model_id])
-            
-            try:
-                # 清理模型资源
-                model_data = self.models[model_id]
 
-                # 从管理器中移除
-                del self.models[model_id]
-                if model_id in self.model_usage:
-                    del self.model_usage[model_id]
-                if model_id in self.model_last_used:
-                    del self.model_last_used[model_id]
-                if model_id in self.model_tasks:
-                    del self.model_tasks[model_id]
+            # Copy data before releasing lock (safe for async cleanup)
+            model_data = self.models[model_id].copy()
 
-                # 🎯 删除持久化配置（会自动清理旧备份）
+        # 🎯 Step 2: Cleanup external resources OUTSIDE lock (allows await)
+        for client_name in ['milvus_client', 'redis_client']:
+            client = model_data.get(client_name)
+            if client:
+                try:
+                    await self._safe_close_client(client)
+                    logger.debug(f"🧹 模型 {model_id} 清理 {client_name}")
+                except Exception as e:
+                    logger.warning(f"⚠️ 模型 {model_id} 清理 {client_name} 失败: {e}")
+
+        try:
+            with self.lock:
+                self.models.pop(model_id, None)
+                self.model_usage.pop(model_id, None)
+                self.model_last_used.pop(model_id, None)
+                self.model_tasks.pop(model_id, None)
+                self.model_created_time.pop(model_id, None)
                 self.persistence_manager.delete_model_config(model_id)
+                # 🎯 Also prune version tracking
+                self._init_versions.pop(model_id, None)
+                self._init_locks.pop(model_id, None)
+            logger.info(f"模型 {model_id} 已销毁，剩余模型数: {len(self.models)}")
+            return True
 
-                logger_chatflow.info(f"模型 {model_id} 已销毁，剩余模型数: {len(self.models)}")
+        except Exception as e:
+            logger.error(f"销毁模型 {model_id} 失败: {str(e)}")
+            return False
 
-                
-                return True
-
-            except Exception as e:
-                logger_chatflow.error(f"销毁模型 {model_id} 失败: {str(e)}")
-                return False
     async def cleanup_idle_models(self, force_reason=None):
         """智能清理空闲模型
         Args:
@@ -472,7 +668,7 @@ class DynamicModelManager:
                 'force_reason': force_reason
             }
 
-            logger_chatflow.info(f"📊 清理前状态: 模型总数={stats['total_models']}, "
+            logger.info(f"📊 清理前状态: 模型总数={stats['total_models']}, "
                                  f"活跃={stats['active_models']}, 空闲={stats['idle_models']}, "
                                  f"内存={stats['current_memory_mb']:.1f}MB")
 
@@ -555,17 +751,22 @@ class DynamicModelManager:
                         else:
                             expired_status = f"未过期(还有{expire_hours * 60:.0f}分钟)"
 
-                    logger_chatflow.info(f"🧹 清理模型: {model_id}, "
+                    logger.info(f"🧹 清理模型: {model_id}, "
                                          f"创建时间: {model_info['created_time'].strftime('%Y-%m-%d %H:%M:%S')}, "
                                          f"空闲: {model_info['idle_time']:.0f}秒, "
                                          f"过期状态: {expired_status}, "
                                          f"原因: {removal_reason}")
 
+            for model_id in list(self._init_versions.keys()):
+                if model_id not in self.models:
+                    self._init_versions.pop(model_id, None)
+                    self._init_locks.pop(model_id, None)
+
             # 🎯 清理后统计
             if removed_count > 0:
                 after_memory = self._get_memory_usage()
                 memory_saved = current_memory - after_memory
-                logger_chatflow.info(f"✅ 清理完成: 移除了 {removed_count} 个模型, "
+                logger.info(f"✅ 清理完成: 移除了 {removed_count} 个模型, "
                                      f"释放内存: {memory_saved:.1f}MB, "
                                      f"剩余模型: {len(self.models)}")
 
@@ -598,12 +799,12 @@ class DynamicModelManager:
 
         # 🎯 内存超限检查
         if current_memory > self.max_memory_mb:
-            logger_chatflow.warning(f"🚨 内存超限: {current_memory:.1f}MB > {self.max_memory_mb}MB")
+            logger.warning(f"🚨 内存超限: {current_memory:.1f}MB > {self.max_memory_mb}MB")
             force_reason = 'memory_exceed'
 
         # 🎯 模型数量超限检查
         elif total_models > self.max_models:
-            logger_chatflow.warning(f"⚠️ 模型数量超限: {total_models} > {self.max_models}")
+            logger.warning(f"⚠️ 模型数量超限: {total_models} > {self.max_models}")
             force_reason = 'count_exceed'
 
         if force_reason:
@@ -611,10 +812,11 @@ class DynamicModelManager:
 
         return {'cleaned': False, 'reason': 'not_needed'}
 
-    def _record_cleanup_stats(self, stats):
+    @staticmethod
+    def _record_cleanup_stats(stats):
         """记录清理统计信息，用于优化配置"""
         # 这里可以存储到文件或数据库，用于分析内存使用模式
-        logger_chatflow.debug(f"📈 清理统计: {json.dumps(stats, default=str)}")
+        logger.debug(f"📈 清理统计: {json.dumps(stats, default=str)}")
 
     @staticmethod
     def _build_chatflow_config(config_data):
@@ -703,11 +905,12 @@ class DynamicModelManager:
                     return {
                         'model_id': model_id,
                         'status': 'active',
-                        'created_time': model_data['created_time'].isoformat(),
-                        'last_used': self.model_last_used[model_id].isoformat(),
-                        'usage_count': self.model_usage[model_id],
+                        'created_time': model_data.get('created_time', datetime.now()).isoformat(),
+                        'last_used': self.model_last_used.get(model_id, datetime.now()).isoformat(),
+                        'usage_count': self.model_usage.get(model_id, 0),
                         'associated_tasks': associated_tasks,  # 🎯 使用 list 而不是 set
-                        'memory_usage': model_data['memory_usage']
+                        'memory_usage': model_data.get('memory_usage', 0),
+                        'version': model_data.get('version')  # Expose version for testing/monitoring
                     }
                 else:
                     return {'model_id': model_id, 'status': 'not_found'}
@@ -726,13 +929,13 @@ class DynamicModelManager:
                     associated_tasks_list = list(self.model_tasks[model_id]) if model_id in self.model_tasks else []
 
                     models_status[model_id] = {
-                        'created_time': data['created_time'].isoformat(),
+                        'created_time': data.get('created_time', datetime.now()).isoformat(),
                         'last_used': self.model_last_used[model_id].isoformat(),
                         'usage_count': self.model_usage[model_id],
                         'associated_tasks': associated_tasks_list,  # 🎯 使用 list
                         'status': 'active' if self.model_usage[model_id] > 0 else 'idle',
-                        'idle_seconds': (datetime.now() - self.model_last_used[
-                            model_id]).total_seconds() if model_id in self.model_last_used else 0
+                        'idle_seconds': (datetime.now() - self.model_last_used[model_id]).total_seconds() if model_id in self.model_last_used else 0,
+                        'version': data.get('version')
                     }
 
                 return {
@@ -748,7 +951,8 @@ class DynamicModelManager:
                     'models': models_status  # 🎯 使用修复后的字典
                 }
 
-    def _get_memory_usage(self):
+    @staticmethod
+    def _get_memory_usage():
         """获取内存使用情况"""
         process = psutil.Process(os.getpid())
         return process.memory_info().rss / 1024 / 1024  # MB
@@ -758,7 +962,7 @@ class DynamicModelManager:
         current_memory = self._get_memory_usage()
         # 这里可以保留作为独立的内存检查，但清理逻辑已经集成到智能清理中
         if current_memory > 1024:  # 超过1GB
-            logger_chatflow.warning(f"⚠️ 内存使用较高: {current_memory:.1f}MB")
+            logger.warning(f"⚠️ 内存使用较高: {current_memory:.1f}MB")
             # 触发智能清理
             await self.check_and_cleanup_if_needed()
 
@@ -769,7 +973,7 @@ class DynamicModelManager:
         """检查磁盘使用情况，防止磁盘爆满"""
         disk_info = self.persistence_manager.get_disk_usage()
         if disk_info and disk_info.get('usage_percent', 0) > 90:
-            logger_chatflow.warning(f"⚠️ 磁盘使用率过高: {disk_info['usage_percent']:.1f}%")
+            logger.warning(f"⚠️ 磁盘使用率过高: {disk_info['usage_percent']:.1f}%")
             return False
         return True
 
@@ -982,7 +1186,7 @@ async def generate_response():
             print(f"代码: {error_info['code']}")
             print("完整堆栈:")
             print(error_info['full_traceback'])
-        logger_chatflow.error(f"生成话术失败 - 模型: {actual_used_model}, 呼叫: {call_id}, 错误: {str(e)}，完整堆栈：{error_info['full_traceback']}")
+        logger.error(f"生成话术失败 - 模型: {actual_used_model}, 呼叫: {call_id}, 错误: {str(e)}，完整堆栈：{error_info['full_traceback']}")
         return jsonify({
             'success': False,
             'message': f'话术生成失败: {str(e)}'
@@ -1006,7 +1210,7 @@ async def again_model():
             'message': 'model_id 参数不能为空'
         }), 400
 
-    if model_manager.again_model(model_id):
+    if await model_manager.again_model(model_id):
         return jsonify({
             'success': True,
             'message': f'模型 {model_id} 销毁成功'
@@ -1128,8 +1332,8 @@ def start_dynamic_service(port=5002):
     logging.getLogger("hypercorn").setLevel(logging.INFO)
     hypercorn_logger = logging.getLogger("hypercorn.access")
 
-    logger_chatflow.info(f"启动动态AI模型服务，端口: {port}")
-    logger_chatflow.info("服务特点: 动态模型管理，按需创建，自动清理")
+    logger.info(f"启动动态AI模型服务，端口: {port}")
+    logger.info("服务特点: 动态模型管理，按需创建，自动清理")
 
     config = Config()
     config.bind = [f"0.0.0.0:{port}"]
@@ -1141,15 +1345,15 @@ def start_dynamic_service(port=5002):
     config.use_reloader = False
     config.lifespan = "off"  # ✅ CRITICAL: disable ASGI lifespan
 
-    logger_chatflow.info(f"Hypercorn 配置:")
-    logger_chatflow.info(f"  - 端口: {port}")
-    logger_chatflow.info(f"  - 启动超时: {config.startup_timeout}s")
-    logger_chatflow.info(f"  - Lifespan: {config.lifespan}")
+    logger.info(f"Hypercorn 配置:")
+    logger.info(f"  - 端口: {port}")
+    logger.info(f"  - 启动超时: {config.startup_timeout}s")
+    logger.info(f"  - Lifespan: {config.lifespan}")
 
     try:
         asyncio.run(serve(app, config))
     except Exception as e:
-        logger_chatflow.error(f"服务启动失败: {e}")
+        logger.error(f"服务启动失败: {e}")
         import traceback
         traceback.print_exc()
         raise
