@@ -1,6 +1,8 @@
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 # AI Customer Service Agent Generator
 
+**This service is available at [telrobot.qutuitech.cn](https://telrobot.qutuitech.cn/). If you would like to give it a try, please contact me via [email](mailto:lituokobe@gmail.com).**
+
 A highly configurable **AI-powered customer service agent engine** with a visual workflow designer.
 It allows business users to quickly build LLM-powered customer service agents using node-based
 conversation flows and conditional logic.

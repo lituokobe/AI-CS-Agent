@@ -7,11 +7,8 @@ ALI_API_KEY = ""
 DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1"
 DEEPSEEK_API_KEY = ""
 
-GLM_BASE_URL = "https://open.bigmodel.cn/api/paas/v4"
-GLM_API_KEY = ""
-
 qwen_turbo = ChatOpenAI(
-    model = 'qwen-turbo',
+    model = 'qwen-turbo-latest',
     temperature = 0,
     api_key = ALI_API_KEY,
     base_url = ALI_BASE_URL,
@@ -20,17 +17,17 @@ qwen_turbo = ChatOpenAI(
 )
 
 qwen_flash = ChatOpenAI(
-    model = 'qwen-flash',
+    model = 'qwen3.5-flash',
     temperature = 0,
     api_key = ALI_API_KEY,
     base_url = ALI_BASE_URL,
     max_tokens = 500,
+    extra_body={"enable_thinking": False},
     model_kwargs={"response_format": {"type": "json_object"}}
 )
 
 qwen_max = ChatOpenAI(
-    # model = 'qwen-plus',
-    model = 'qwen-max',
+    model = 'qwen3-max-2026-01-23',
     temperature = 0,
     api_key = ALI_API_KEY,
     base_url = ALI_BASE_URL,
@@ -40,21 +37,10 @@ qwen_max = ChatOpenAI(
 
 deepseek_llm = ChatOpenAI(
     model = 'deepseek-chat',
-    # model='deepseek-reasoner',
     temperature = 0,
     api_key = DEEPSEEK_API_KEY,
     base_url = DEEPSEEK_BASE_URL,
-    max_tokens = 100,
-    model_kwargs={"response_format": {"type": "json_object"}}
-)
-
-glm_llm = ChatOpenAI(
-    # model = 'glm-4.5',
-    model = 'glm-4.6',
-    temperature = 0,
-    api_key = GLM_API_KEY,
-    base_url = GLM_BASE_URL,
-    max_tokens = 100,
+    max_tokens = 500,
     model_kwargs={"response_format": {"type": "json_object"}}
 )
 

@@ -11,7 +11,7 @@ from pymilvus import MilvusClient, AsyncMilvusClient
 from functionals.embedding_functions import embed_query
 
 # LLM approach
-from models.llm_models import qwen_turbo, qwen_flash, qwen_max, deepseek_llm, glm_llm, local_llm
+from models.llm_models import qwen_turbo, qwen_flash, qwen_max, deepseek_llm, local_llm
 from data.string_asset import docstring_base_raw, priority_map, docstring_tail
 from langchain_core.messages import HumanMessage
 import ast
@@ -239,18 +239,22 @@ class LLMInferenceMatcher:
     @staticmethod
     def _select_llm(llm_name: str):
         if llm_name == "qwen_turbo":
+            logger.info("使用大模型: qwen_turbo")
             return qwen_turbo
-        elif llm_name == "qwen_flash":
+        elif llm_name == "qwen3.5-flash":
+            logger.info("使用大模型: qwen_flash")
             return qwen_flash
-        elif llm_name == "qwen_max":
+        elif llm_name == "qwen3-max-2026-01-23":
+            logger.info("使用大模型: qwen_max")
             return qwen_max
         elif llm_name == "local_llm":
+            logger.info("使用本地部署大模型")
             return local_llm
-        elif llm_name == "deepseek_llm":
+        elif llm_name == "deepseek-chat":
+            logger.info("使用大模型: deepseek-chat")
             return deepseek_llm
-        elif llm_name == "glm_llm":
-            return glm_llm
-        return qwen_turbo
+        logger.info("使用大模型: qwen_flash")
+        return qwen_flash
 
     def _create_base_docstring(self, intention_priority: int) -> list:
         """

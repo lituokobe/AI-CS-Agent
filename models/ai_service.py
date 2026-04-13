@@ -900,7 +900,7 @@ class DynamicModelManager:
                 if model_id in self.models:
                     model_data = self.models[model_id]
                     # 🎯 修复：将 set 转换为 list 以便 JSON 序列化
-                    associated_tasks = list(self.model_tasks[model_id]) if model_id in self.model_tasks else []
+                    associated_tasks = list(self.model_tasks.get(model_id, set()))
 
                     return {
                         'model_id': model_id,
@@ -916,8 +916,8 @@ class DynamicModelManager:
                     return {'model_id': model_id, 'status': 'not_found'}
             else:
                 # 全局状态 - 增强信息
-                idle_models = [m for m in self.models if self.model_usage[m] == 0]
-                active_models = [m for m in self.models if self.model_usage[m] > 0]
+                idle_models = [m for m in self.models if self.model_usage.get(m, 0) == 0]
+                active_models = [m for m in self.models if self.model_usage.get(m, 0) > 0]
 
                 # 计算内存使用统计
                 total_estimated_memory = len(self.models) * self.model_memory_estimate
@@ -926,15 +926,17 @@ class DynamicModelManager:
                 models_status = {}
                 for model_id, data in self.models.items():
                     # 🎯 修复：将 set 转换为 list
-                    associated_tasks_list = list(self.model_tasks[model_id]) if model_id in self.model_tasks else []
+                    associated_tasks_list = list(self.model_tasks.get(model_id, set()))
+                    last_used = self.model_last_used.get(model_id, data.get('created_time', datetime.now()))
+                    usage_count = self.model_usage.get(model_id, 0)
 
                     models_status[model_id] = {
                         'created_time': data.get('created_time', datetime.now()).isoformat(),
-                        'last_used': self.model_last_used[model_id].isoformat(),
-                        'usage_count': self.model_usage[model_id],
+                        'last_used': last_used.isoformat(),
+                        'usage_count': usage_count,
                         'associated_tasks': associated_tasks_list,  # 🎯 使用 list
-                        'status': 'active' if self.model_usage[model_id] > 0 else 'idle',
-                        'idle_seconds': (datetime.now() - self.model_last_used[model_id]).total_seconds() if model_id in self.model_last_used else 0,
+                        'status': 'active' if usage_count > 0 else 'idle',
+                        'idle_seconds': (datetime.now() - last_used).total_seconds(),
                         'version': data.get('version')
                     }
 

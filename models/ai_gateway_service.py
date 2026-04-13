@@ -905,6 +905,8 @@ def conversation():
             'actual_model_id': actual_model_id,
             'backstop_model': backstop_model,
             'start_time': time.time(),
+            'tts_num': 0,
+            'tts_words':0,
             'metadata': {}  # 🎯 新增详细历史存储
         }
     # 🎯 调用AI模型服务生成话术
@@ -973,7 +975,6 @@ def conversation():
     conversation_data['actual_model_id'] = actual_model_id
     conversation_data['last_update'] = time.time()
     conversation_data['variables_processed'] = True  # 标记变量已处理
-    redis_client.setex(conversation_key, 3600, json.dumps(conversation_data))
 
     # 自动绑定任务到实际使用的模型
     gateway_manager.bind_task_to_model(task_id, actual_model_id)
@@ -1021,6 +1022,12 @@ def conversation():
             'content': mixed_content,
             'dynamic_params': dynamic_params,
         })
+        for val in mixed_content['content']:
+            if val['type'] == 'tts':
+                conversation_data['tts_num'] += 1
+                conversation_data['tts_words'] += len(val['value'])
+
+    redis_client.setex(conversation_key, 3600, json.dumps(conversation_data))
 
     logger.info(f"✅ 对话响应生成 - 结果: {response}")
     logger.info(f"✅ 对话响应生成 - 任务: {task_id}, 呼叫: {call_id}, 结束通话: {end_call}")
