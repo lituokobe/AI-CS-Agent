@@ -57,6 +57,7 @@ class DynamicModelManager:
         self.model_tasks = defaultdict(set)  # 模型关联的任务
         self.model_created_time = {}  # 🎯 记录模型创建时间
         self.lock = threading.RLock()
+        self.ttl_config = {"default_ttl": 1440, "refresh_on_read": False}
 
         # 🎯 持久化管理器
         self.persistence_manager = ModelPersistenceManager()
@@ -224,7 +225,7 @@ class DynamicModelManager:
                     # Let Redis reserve the binary data, instead converting it to Python strings
                     max_connections=50
                 )
-                redis_checkpointer = AsyncRedisSaver(redis_client=redis_client)
+                redis_checkpointer = AsyncRedisSaver(redis_client=redis_client, ttl=self.ttl_config)
                 await redis_checkpointer.setup()  # Async setup
                 chatflow, milvus_client = await build_chatflow(chatflow_config, redis_checkpointer=redis_checkpointer)
                 logger.info("✅ build_chatflow completed!")
@@ -368,7 +369,7 @@ class DynamicModelManager:
                     # Let Redis reserve the binary data, instead converting it to Python strings
                     max_connections=50
                 )
-                redis_checkpointer = AsyncRedisSaver(redis_client=redis_client)
+                redis_checkpointer = AsyncRedisSaver(redis_client=redis_client, ttl=self.ttl_config)
                 await redis_checkpointer.setup()  # Async setup
 
                 chatflow, milvus_client = await build_chatflow(chatflow_config, redis_checkpointer=redis_checkpointer)

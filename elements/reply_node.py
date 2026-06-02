@@ -53,6 +53,11 @@ class ReplyNode:
         logs: list = state.get("logs", [])
         previous_log: dict = logs[-1] if logs else {}
 
+        #TODO: Get the last user intention branch
+        last_user_intention_branch=previous_log.get('branch_type',"")
+        if last_user_intention_branch not in ["SURE", "DEFAULT", "CUSTOMER", "REJECT", "DENY", "NO_REPLY"]:
+            last_user_intention_branch = ""
+
         #TODO: Get the last token usage
         token_used = int(previous_log.get("token_used", 0))
         total_token_used = int(previous_log.get("total_token_used", 0))
@@ -164,7 +169,7 @@ class ReplyNode:
                     if infer_tool == "大模型":
                         user_logic_title = {
                             "匹配到": match_to,
-                            "匹配到分支": f"【{last_user_log.get('intention_name', '')}】",
+                            "知识库名称": f"【{last_user_log.get('intention_name', '')}】",
                             "匹配方式": f"【{infer_tool}】",
                             "知识库类型": f"【{last_user_log.get('knowledge_type')}】",
                             "大模型理解": last_user_log.get('llm_input_summary', ''),
@@ -172,7 +177,7 @@ class ReplyNode:
                     elif infer_tool == "关键词":
                         user_logic_title = {
                             "匹配到": match_to,
-                            "匹配到分支": f"【{last_user_log.get('intention_name', '')}】",
+                            "知识库名称": f"【{last_user_log.get('intention_name', '')}】",
                             "匹配方式": f"【{infer_tool}】",
                             "知识库类型": f"【{last_user_log.get('knowledge_type')}】",
                             "匹配内容": f"【{last_user_log.get('matching_content')}】",
@@ -181,7 +186,7 @@ class ReplyNode:
                     elif infer_tool == "问法":
                         user_logic_title = {
                             "匹配到": match_to,
-                            "匹配到分支": f"【{last_user_log.get('intention_name', '')}】",
+                            "知识库名称": f"【{last_user_log.get('intention_name', '')}】",
                             "匹配方式": f"【{infer_tool}】",
                             "知识库类型": f"【{last_user_log.get('knowledge_type')}】",
                             "匹配内容": f"【{last_user_log.get('matching_content')}】",
@@ -234,6 +239,7 @@ class ReplyNode:
                 "end_call": self.end_call,
                 "reply_round": reply_round,
                 "user_input": user_input,
+                "last_user_intention_branch":last_user_intention_branch,
                 "token_used": token_used,
                 "total_token_used": total_token_used,
                 "content" : previous_content +[
@@ -345,6 +351,11 @@ class ReplyNodeKGF:
         #TODO: Get the last log info
         logs:list = state.get("logs", [])
         previous_log:dict = logs[-1] if logs else {}
+
+        #TODO: Get the last user intention branch
+        last_user_intention_branch=previous_log.get('branch_type',"")
+        if last_user_intention_branch not in ["SURE", "DEFAULT", "CUSTOMER", "REJECT", "DENY", "NO_REPLY"]:
+            last_user_intention_branch = ""
 
         #TODO: Get the last token usage
         token_used = int(previous_log.get("token_used", 0))
@@ -508,7 +519,7 @@ class ReplyNodeKGF:
                     if infer_tool == "大模型":
                         user_logic_title = {
                             "匹配到": match_to,
-                            "匹配到分支": f"【{last_user_log.get('intention_name', '')}】",
+                            "知识库名称": f"【{last_user_log.get('intention_name', '')}】",
                             "匹配方式": f"【{infer_tool}】",
                             "知识库类型": f"【{last_user_log.get('knowledge_type')}】",
                             "大模型理解": last_user_log.get('llm_input_summary', ''),
@@ -516,7 +527,7 @@ class ReplyNodeKGF:
                     elif infer_tool == "关键词":
                         user_logic_title = {
                             "匹配到": match_to,
-                            "匹配到分支": f"【{last_user_log.get('intention_name', '')}】",
+                            "知识库名称": f"【{last_user_log.get('intention_name', '')}】",
                             "匹配方式": f"【{infer_tool}】",
                             "知识库类型": f"【{last_user_log.get('knowledge_type')}】",
                             "匹配内容": f"【{last_user_log.get('matching_content')}】",
@@ -525,7 +536,7 @@ class ReplyNodeKGF:
                     elif infer_tool == "问法":
                         user_logic_title = {
                             "匹配到": match_to,
-                            "匹配到分支": f"【{last_user_log.get('intention_name', '')}】",
+                            "知识库名称": f"【{last_user_log.get('intention_name', '')}】",
                             "匹配方式": f"【{infer_tool}】",
                             "知识库类型": f"【{last_user_log.get('knowledge_type')}】",
                             "匹配内容": f"【{last_user_log.get('matching_content')}】",
@@ -575,6 +586,7 @@ class ReplyNodeKGF:
                 "end_call": self.end_call,
                 "reply_round": reply_round,
                 "user_input": user_input,
+                "last_user_intention_branch": last_user_intention_branch,
                 "token_used": token_used,
                 "total_token_used": total_token_used,
                 "content" : previous_content +[
@@ -691,6 +703,11 @@ class ReplyNodeKT:
         #TODO: Get the last log info
         logs:list = state.get("logs", [])
         previous_log:dict = logs[-1] if logs else {}
+
+        #TODO: Get the last user intention branch
+        last_user_intention_branch=previous_log.get('branch_type',"")
+        if last_user_intention_branch not in ["SURE", "DEFAULT", "CUSTOMER", "REJECT", "DENY", "NO_REPLY"]:
+            last_user_intention_branch = ""
 
         #TODO: Get the last token usage
         token_used = int(previous_log.get("token_used", 0))
@@ -835,7 +852,7 @@ class ReplyNodeKT:
                     if infer_tool == "大模型":
                         user_logic_title = {
                             "匹配到": match_to,
-                            "匹配到分支": f"【{last_user_log.get('intention_name', '')}】",
+                            "知识库名称": f"【{last_user_log.get('intention_name', '')}】",
                             "匹配方式": f"【{infer_tool}】",
                             "知识库类型": f"【{last_user_log.get('knowledge_type')}】",
                             "大模型理解": last_user_log.get('llm_input_summary', ''),
@@ -843,7 +860,7 @@ class ReplyNodeKT:
                     elif infer_tool == "关键词":
                         user_logic_title = {
                             "匹配到": match_to,
-                            "匹配到分支": f"【{last_user_log.get('intention_name', '')}】",
+                            "知识库名称": f"【{last_user_log.get('intention_name', '')}】",
                             "匹配方式": f"【{infer_tool}】",
                             "知识库类型": f"【{last_user_log.get('knowledge_type')}】",
                             "匹配内容": f"【{last_user_log.get('matching_content')}】",
@@ -852,7 +869,7 @@ class ReplyNodeKT:
                     elif infer_tool == "问法":
                         user_logic_title = {
                             "匹配到": match_to,
-                            "匹配到分支": f"【{last_user_log.get('intention_name', '')}】",
+                            "知识库名称": f"【{last_user_log.get('intention_name', '')}】",
                             "匹配方式": f"【{infer_tool}】",
                             "知识库类型": f"【{last_user_log.get('knowledge_type')}】",
                             "匹配内容": f"【{last_user_log.get('matching_content')}】",
@@ -902,6 +919,7 @@ class ReplyNodeKT:
                 "end_call": self.end_call,
                 "reply_round": reply_round,
                 "user_input": user_input,
+                "last_user_intention_branch": last_user_intention_branch,
                 "token_used": token_used,
                 "total_token_used": total_token_used,
                 "content" : previous_content +[

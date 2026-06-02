@@ -36,7 +36,7 @@ qwen_max = ChatOpenAI(
 )
 
 deepseek_llm = ChatOpenAI(
-    model = 'deepseek-chat',
+    model = 'deepseek-v4-flash',
     temperature = 0,
     api_key = DEEPSEEK_API_KEY,
     base_url = DEEPSEEK_BASE_URL,
@@ -79,11 +79,11 @@ if __name__ == '__main__':
                   response_metadata={},
                   id='0bbcf2fa-7dd4-4c93-9e97-95dfeb87c1a6'
                   ),
-        HumanMessage(content='有这方面的打算',
+        HumanMessage(content='有这方面的打算。请用json回复我。',
                      additional_kwargs={},
                      response_metadata={},
                      id='caccf4b0-6fd9-4a77-996f-ed809667dc4b'
                      )
     ]
-    response = qwen_turbo.invoke(test_messages)
+    response = deepseek_llm.invoke(test_messages)
     print(response)

@@ -251,7 +251,7 @@ class LLMInferenceMatcher:
             logger.info("使用本地部署大模型")
             return local_llm
         elif llm_name == "deepseek-chat":
-            logger.info("使用大模型: deepseek-chat")
+            logger.info("使用大模型: deepseek")
             return deepseek_llm
         logger.info("使用大模型: qwen_flash")
         return qwen_flash
