@@ -42,7 +42,12 @@ services:
       - ./data:/app/data:rw
       - ./persistence:/app/persistence:rw
       - ./models:/app/models:rw
-
+    # --- Container log limits ---
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
     working_dir: /app #optional, as WORKDIR is already specified in Dockerfile
     healthcheck:
       test: ["CMD", "sh", "-c", "curl -f http://127.0.0.1:5001/gateway/health"]
@@ -90,7 +95,12 @@ services:
       - ./data:/app/data:rw
       - ./persistence:/app/persistence:rw
       - ./models:/app/models:rw
-
+    # --- Container log limits ---
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
     working_dir: /app
     healthcheck:
       test: [ "CMD", "sh", "-c", "curl -f http://127.0.0.1:5001/gateway/health" ]

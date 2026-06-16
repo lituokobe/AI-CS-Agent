@@ -72,7 +72,7 @@ start_service() {
 
     # Wait for port to be ready
     echo "⏳ 等待 $service_name 开启..."
-    for i in {1..60}; do
+    for i in {1..300}; do
         if ! check_pid $pid; then
             echo "❌ $service_name 进程终止"
             tail -20 "$log_file"
@@ -87,7 +87,7 @@ start_service() {
         sleep 2
     done
 
-    echo "❌ $service_name 120秒内启动失败"
+    echo "❌ $service_name 规定时间内启动失败"
     tail -50 "$log_file"
     return 1
 }
