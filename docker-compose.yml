@@ -9,10 +9,10 @@ services:
     mem_reservation: 1g
     ports:
       - "5001:5001"  # ai_gateway_service
-    # 🚨 CRITICAL: Override entrypoint/command to use mounted entrypoint
     entrypoint: ["/bin/bash", "/app/entrypoint.sh"]
-    extra_hosts: #for Linux deployment, define docker's host url
+    extra_hosts:
       - "host.docker.internal:host-gateway"
+      - "telapibeta.km360.cn:host-gateway"
     environment:
       - PYTHONUNBUFFERED=1
       - PYTHONDONTWRITEBYTECODE=1
