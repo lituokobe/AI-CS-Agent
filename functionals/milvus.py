@@ -5,12 +5,13 @@ import asyncio
 from pymilvus import MilvusClient, AsyncMilvusClient, MilvusException
 from pymilvus.milvus_client import IndexParams
 from common.logger import setup_logger
-from functionals.embedding_functions import embed_query
+from functionals.embedding_functions import embed_documents
+
 logger = setup_logger('milvus', category='milvus', console_output=True)
 
 #TODO: sync Milvus client
 class LaunchMilvus:
-    def __init__(self, vector_db_url: str, collection_name: str, intentions: list = None, knowledge: list = None):
+    def __init__(self, vector_db_url: str, collection_name: str, intentions: list|None = None, knowledge: list|None = None):
         self.client = MilvusClient(uri = vector_db_url, secure=False)
         self.collection_name = collection_name
         self.merged_data = (intentions or []) + (knowledge or [])
@@ -23,7 +24,7 @@ class LaunchMilvus:
         # Convert to int and mask to 63 bits (safe for INT64)
         return int(hash_str[:16], 16) & ((1 << 63) - 1)
 
-    def _ensure_collection_ready(self, merged_data: list = None):
+    def _ensure_collection_ready(self, merged_data: list|None = None):
         """Ensure collection exists and is ready with data."""
         # if collection doesn't exist, create it.
         if not self.client.has_collection(self.collection_name):
@@ -123,28 +124,49 @@ class LaunchMilvus:
     def _upsert_intention_data(self, merged_data: list):
         """Upsert intention data - index automatically handles new vectors."""
         upsert_data = []
+        embedding_tasks = []
+        BATCH_SIZE = 50
         for item in merged_data:
             intention_id = item.get("intention_id")
             intention_name = item.get("intention_name")
             for phrase in item.get("semantic", []):
-                if phrase.strip():  # skip empty
-                    # embedding = qwen3_embedding_model.embed_documents(phrase)
-                    embedding = embed_query(phrase)
-                    if hasattr(embedding, 'tolist'):#convert array-like objects into standard lists, required by Milvus
-                        embedding = embedding.tolist()
-                    if len(embedding)!=self.dimension:
-                        e_m = f"向量数据库collection：{self.collection_name}向量为度应为{self.dimension}，目前为{len(embedding)}"
-                        logger.error(e_m)
-                        raise ValueError(e_m)
+                clean_phrase = phrase.strip()
+                if clean_phrase:  # skip empty
+                    embedding_tasks.append(
+                        {
+                            "phrase": clean_phrase,
+                            "intention_id": intention_id,
+                            "intention_name": intention_name,
+                        }
+                    )
 
-                    phrase_id = self._generate_phrase_id(intention_id, phrase)
-                    upsert_data.append({
+        for i in range(0, len(embedding_tasks), BATCH_SIZE):
+            batch_tasks = embedding_tasks[i : i + BATCH_SIZE]
+            batch_phrases = [task["phrase"] for task in batch_tasks]
+
+            # Fetch batched embeddings (1 HTTP request instead of 50)
+            batch_embeddings = embed_documents(batch_phrases)
+
+            # Reconstruct the data for Milvus
+            for task, embedding in zip(batch_tasks, batch_embeddings):
+                # Note: The server already returns a Python list, so .tolist() is no longer needed!
+                if len(embedding) != self.dimension:
+                    e_m = f"向量数据库collection：{self.collection_name}向量维度应为{self.dimension}，目前为{len(embedding)}"
+                    logger.error(e_m)
+                    raise ValueError(e_m)
+
+                phrase_id = self._generate_phrase_id(
+                    task["intention_id"], task["phrase"]
+                )
+                upsert_data.append(
+                    {
                         "id": phrase_id,
                         "vector": embedding,
-                        "intention_id": intention_id,
-                        "intention_name": intention_name,
-                        "phrase": phrase
-                    })
+                        "intention_id": task["intention_id"],
+                        "intention_name": task["intention_name"],
+                        "phrase": task["phrase"],
+                    }
+                )
 
         if not upsert_data:
             logger.info(f"没有问法短语插入向向量数据库collection：{self.collection_name}")
@@ -183,13 +205,12 @@ class LaunchMilvusAsync:
         self.collection_name = collection_name
         self.merged_data = (intentions or []) + (knowledge or [])
         self.embedding_cache = {}  # Embedding cache to avoid redundant computation
-        self.embedding_semaphore = asyncio.Semaphore(10)
         self._stats = {
             "embeddings_generated": 0,
             "embeddings_cached": 0,
             "total_phrases_processed": 0
         }
-        self._cache_lock = threading.RLock()
+        self._cache_lock = asyncio.Lock()
         self._max_cache_size = 10000
         self.limit = 10000 # limit for collection client query
         self.dimension = 1024 # dimension from the embedding model: BGE, Qwen0.6B - 1024; Qwen4B - 2560
@@ -205,11 +226,14 @@ class LaunchMilvusAsync:
         start_time = time.time()
         logger.info(f"开始处理向量数据库collection：{self.collection_name}")
 
+        has_collection = False
+
         # if collection doesn't exist, create it.
         try:
             has_collection = await self.client.has_collection(self.collection_name, timeout=20.0)  # AWAIT
         except asyncio.TimeoutError:
             logger.error(f"向量数据库collection：{self.collection_name} 连接超时 (20秒)")
+            return None
         except Exception as e:
             logger.error(f"查询向量数据库collection：{self.collection_name} 是否存在失败: {str(e)}")
             return None
@@ -267,13 +291,20 @@ class LaunchMilvusAsync:
         try:
             # First, drop any existing indexes on the vector field
             existing_indexes = await self.client.list_indexes(self.collection_name)
-            for index_name in existing_indexes:
+
+            if existing_indexes:
                 try:
                     await self.client.release_collection(self.collection_name)
+                except Exception as e:
+                    logger.warning(f"向量数据库collection：{self.collection_name}释放内存时发生警告：{str(e)}")
+
+            for index_name in existing_indexes:
+                try:
                     await self.client.drop_index(self.collection_name, index_name)
                     logger.info(f"向量数据库collection：{self.collection_name}已删除现有index：{index_name}")
                 except Exception as e:
                     logger.warning(f"向量数据库collection：{self.collection_name}删除index {index_name}时发生警告：{str(e)}")
+
             # Create HNSW index
             index_params = IndexParams()
             index_params.add_index(
@@ -288,7 +319,9 @@ class LaunchMilvusAsync:
             )
             logger.info(f"已创建向量数据库collection：{self.collection_name}的HNSW index")
         except MilvusException as e:
-            logger.info(f"创建向量数据库collection：{self.collection_name} HNSW index时发生错误：{str(e)}")
+            logger.error(
+                f"创建向量数据库collection：{self.collection_name} HNSW index时发生错误：{str(e)}"
+            )
             raise RuntimeError(str(e))
 
     async def _ensure_hnsw_index(self):
@@ -296,6 +329,11 @@ class LaunchMilvusAsync:
         try:
             await self.client.release_collection(self.collection_name)
             existing_indexes = await self.client.list_indexes(self.collection_name)
+
+            if not existing_indexes:
+                logger.info(f"向量数据库collection：{self.collection_name}不存在索引，创建HNSW索引")
+                await self._create_hnsw_index()
+                return
 
             hnsw_exists = False
             for index_name in existing_indexes:
@@ -328,7 +366,6 @@ class LaunchMilvusAsync:
                 else:
                     logger.error(f"向量数据库collection：{self.collection_name}获取现有ID最终失败：{e}")
                     raise
-        return set()
 
     async def _get_existing_phrase_ids(self) -> set[int]:
         """Fetch all existing phrase_id values from Milvus (with pagination)."""
@@ -354,10 +391,13 @@ class LaunchMilvusAsync:
                 offset += self.limit
             return existing_ids
         except Exception as e:
-            logger.warning(f"无法获取现有向量数据库collection：{self.collection_name} phrase_id列表：{e}")
-            return set()
+            e_m = f"无法获取现有向量数据库collection：{self.collection_name} phrase_id列表：{e}"
+            logger.error(e_m)
+            raise RuntimeError(e_m)
 
-    async def _prepare_target_data(self, merged_data: list[dict]) -> tuple[set[int], dict[int, dict]]:
+    async def _prepare_target_data(
+        self, merged_data: list[dict]
+    ) -> tuple[set[int], dict[int, dict]]:
         """Prepare target data: compute IDs and build mapping."""
         target_phrase_ids = set()
         phrase_id_to_data = {}
@@ -366,14 +406,17 @@ class LaunchMilvusAsync:
             intention_id = item.get("intention_id")
             intention_name = item.get("intention_name")
             for phrase in item.get("semantic", []):
-                if not phrase.strip():
+                clean_phrase = phrase.strip()
+                if not clean_phrase:
                     continue
-                phrase_id = self._generate_phrase_id(intention_id, phrase)
+
+                phrase_id = self._generate_phrase_id(intention_id, clean_phrase)
                 target_phrase_ids.add(phrase_id)
+
                 phrase_id_to_data[phrase_id] = {
                     "intention_id": intention_id,
                     "intention_name": intention_name,
-                    "phrase": phrase,
+                    "phrase": clean_phrase,
                 }
 
         logger.info(f"向量数据库collection：{self.collection_name}目标数据包含{len(target_phrase_ids)}条短语")
@@ -453,116 +496,151 @@ class LaunchMilvusAsync:
         if not phrase_ids_to_insert:
             return
 
-        batch_size = 100
+        MILVUS_BATCH_SIZE = 100
         phrase_ids_list = list(phrase_ids_to_insert)
 
-        for i in range(0, len(phrase_ids_list), batch_size):
-            batch_ids = phrase_ids_list[i:i + batch_size]
-            batch_data = await self._prepare_insert_batch_with_concurrency(batch_ids, phrase_id_to_data, self.embedding_semaphore)
+        for i in range(0, len(phrase_ids_list), MILVUS_BATCH_SIZE):
+            batch_ids = phrase_ids_list[i:i + MILVUS_BATCH_SIZE]
+            batch_data = await self._prepare_insert_batch(batch_ids, phrase_id_to_data)
             if batch_data:
                 try:
                     await self.client.insert(collection_name=self.collection_name, data=batch_data)
-                    logger.debug(f"向量数据库collection：{self.collection_name}已插入批次 {i // batch_size + 1}: {len(batch_data)} 条")
+                    logger.debug(f"向量数据库collection：{self.collection_name}已插入批次 {i // MILVUS_BATCH_SIZE + 1}: {len(batch_data)} 条")
                 except Exception as e:
-                    logger.error(f"向量数据库collection：{self.collection_name}批次插入失败：{str(e)}")
+                    e_m = f"向量数据库collection：{self.collection_name}批次插入失败：{str(e)}"
+                    logger.error(e_m)
+                    raise RuntimeError(e_m)
             await asyncio.sleep(0)  # yield control
 
-    async def _prepare_insert_batch_with_concurrency(
-            self, phrase_ids: list[int],
-            phrase_id_to_data: dict[int, dict],
-            semaphore: asyncio.Semaphore
+    async def _prepare_insert_batch(
+        self, batch_ids: list[int], phrase_id_to_data: dict[int, dict]
     ) -> list[dict]:
-        """Prepare a batch of data with embeddings (cached)."""
-        tasks = []
-        for phrase_id in phrase_ids:
-            data = phrase_id_to_data.get(phrase_id)
-            if data:
-                task = self._prepare_single_phrase(phrase_id, data, semaphore)
-                tasks.append(task)
-
-        # run concurrently
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
+        """Prepare a batch of data with embeddings using batched API calls and cache."""
         batch_data = []
-        for result in results:
-            if isinstance(result, dict):
-                batch_data.append(result)
-        return batch_data
+        uncached_phrases = []  # List of tuples: (phrase_id, phrase_text, data_dict)
 
-    async def _prepare_single_phrase(
-            self,
-            phrase_id: int,
-            data: dict,
-            semaphore: asyncio.Semaphore
-    ) -> dict|None:
-        async with semaphore:
-            try:
+        # 1. Separate cached and uncached phrases
+        async with self._cache_lock:
+            for phrase_id in batch_ids:
+                data = phrase_id_to_data.get(phrase_id)
+                if not data:
+                    continue
+
                 phrase_text = data["phrase"]
-                cache_key = f"{data['intention_id']}:{phrase_text}"
+                intention_id = data["intention_id"]
+                cache_key = f"{intention_id}:{phrase_text}"
 
-                # stats and cache limitation
-                with self._cache_lock:
-                    self._stats["total_phrases_processed"] += 1
-                    if cache_key in self.embedding_cache:
-                        embedding = self.embedding_cache[cache_key]
-                        self._stats["embeddings_cached"] += 1
-                    else:
-                        # Simple cache clearance
-                        if len(self.embedding_cache) >= self._max_cache_size:
-                            # Delete first 10% cache
-                            keys_to_remove = list(self.embedding_cache.keys())[:self._max_cache_size // 10]
-                            for key in keys_to_remove:
-                                del self.embedding_cache[key]
+                self._stats["total_phrases_processed"] += 1
 
-                        # embedding = embed_query(phrase_text)
-                        embedding = await asyncio.to_thread(embed_query, phrase_text)
-                        if hasattr(embedding, 'tolist'):
-                            embedding = embedding.tolist()
-                        if len(embedding) != self.dimension:
-                            logger.error(f"向量数据库collection：{self.collection_name}向量维度错误: {len(embedding)}，跳过：{phrase_text[:50]}...")
-                            return None
-                        self.embedding_cache[cache_key] = embedding
-                        self._stats["embeddings_generated"] += 1
+                if cache_key in self.embedding_cache:
+                    embedding = self.embedding_cache[cache_key]
+                    self._stats["embeddings_cached"] += 1
+                    batch_data.append(
+                        {
+                            "id": phrase_id,
+                            "vector": embedding,
+                            "intention_id": intention_id,
+                            "intention_name": data["intention_name"],
+                            "phrase": phrase_text,
+                        }
+                    )
+                else:
+                    uncached_phrases.append((phrase_id, phrase_text, data))
 
-                return {
-                    "id": phrase_id,
-                    "vector": embedding,
-                    "intention_id": data["intention_id"],
-                    "intention_name": data["intention_name"],
-                    "phrase": phrase_text
-                }
-            except Exception as e:
-                logger.error(f"向量数据库collection：{self.collection_name}嵌入处理短语失败 '{phrase_text[:50]}...': {e}")
-                return None
+        # 2. Fetch embeddings for uncached phrases in bulk
+        if uncached_phrases:
+            EMBED_API_BATCH_SIZE = 50
+
+            uncached_texts = [item[1] for item in uncached_phrases]
+            uncached_embeddings = []
+
+            # Chunk the uncached texts to avoid sending massive payloads in a single HTTP request
+            for j in range(0, len(uncached_texts), EMBED_API_BATCH_SIZE):
+                chunk_texts = uncached_texts[j : j + EMBED_API_BATCH_SIZE]
+                try:
+                    # embed_documents is sync (uses requests), so we run it in a thread
+                    chunk_embs = await asyncio.to_thread(embed_documents, chunk_texts)
+                    uncached_embeddings.extend(chunk_embs)
+                except Exception as e:
+                    logger.error(f"批量获取嵌入向量失败: {e}")
+                    # If the API fails, append None for these phrases so they are safely skipped
+                    uncached_embeddings.extend([None] * len(chunk_texts))
+
+            # 3. Map embeddings back to phrases, validate, update cache, and add to batch_data
+            async with self._cache_lock:
+                # Simple cache clearance if we exceed max size
+                if (
+                    len(self.embedding_cache) + len(uncached_phrases)
+                    > self._max_cache_size
+                ):
+                    keys_to_remove = list(self.embedding_cache.keys())[
+                        : len(uncached_phrases) + (self._max_cache_size // 10)
+                    ]
+                    for key in keys_to_remove:
+                        del self.embedding_cache[key]
+
+                for (phrase_id, phrase_text, data), embedding in zip(
+                    uncached_phrases, uncached_embeddings
+                ):
+                    if embedding is None:
+                        continue
+
+                    if hasattr(embedding, "tolist"):
+                        embedding = embedding.tolist()
+
+                    if len(embedding) != self.dimension:
+                        logger.error(
+                            f"向量数据库collection：{self.collection_name}向量维度错误: {len(embedding)}，跳过：{phrase_text[:50]}..."
+                        )
+                        continue
+
+                    cache_key = f"{data['intention_id']}:{phrase_text}"
+                    self.embedding_cache[cache_key] = embedding
+                    self._stats["embeddings_generated"] += 1
+
+                    batch_data.append(
+                        {
+                            "id": phrase_id,
+                            "vector": embedding,
+                            "intention_id": data["intention_id"],
+                            "intention_name": data["intention_name"],
+                            "phrase": phrase_text,
+                        }
+                    )
+
+        return batch_data
 
     async def _insert_all_data(self, merged_data: list[dict]):
         """Insert all data on first-time collection creation."""
         logger.info(f"向量数据库collection：{self.collection_name}开始初始数据插入...")
-        all_items = []
+        phrase_id_to_data = {}
+        all_items_count = 0
+
         for item in merged_data:
             intention_id = item.get("intention_id")
             intention_name = item.get("intention_name")
             for phrase in item.get("semantic", []):
-                if phrase.strip():
-                    phrase_id = self._generate_phrase_id(intention_id, phrase)
-                    all_items.append({
-                        "id": phrase_id,
+                clean_phrase = phrase.strip()
+                if clean_phrase:
+                    phrase_id = self._generate_phrase_id(intention_id, clean_phrase)
+                    phrase_id_to_data[phrase_id] = {
                         "intention_id": intention_id,
                         "intention_name": intention_name,
-                        "phrase": phrase
-                    })
+                        "phrase": clean_phrase,
+                    }
+                    all_items_count += 1
 
-        batch_size = 200
-        for i in range(0, len(all_items), batch_size):
-            batch = all_items[i:i + batch_size]
-            data_map = {item["id"]: item for item in batch}
-            insert_batch = await self._prepare_insert_batch_with_concurrency(list(data_map.keys()), data_map, self.embedding_semaphore)
+        MILVUS_BATCH_SIZE = 200
+        phrase_ids_list = list(phrase_id_to_data.keys())
+        for i in range(0, len(phrase_ids_list), MILVUS_BATCH_SIZE):
+            batch_ids = phrase_ids_list[i:i + MILVUS_BATCH_SIZE]
+            insert_batch = await self._prepare_insert_batch(batch_ids, phrase_id_to_data)
             if insert_batch:
                 await self.client.insert(collection_name=self.collection_name, data=insert_batch)
-                logger.debug(f"向量数据库collection：{self.collection_name}初始插入批次{i // batch_size + 1}: {len(insert_batch)}条")
+                logger.debug(f"向量数据库collection：{self.collection_name}初始插入批次{i // MILVUS_BATCH_SIZE + 1}: {len(insert_batch)}条")
             await asyncio.sleep(0)
 
-        logger.info(f"向量数据库collection：{self.collection_name}初始数据插入完成，共 {len(all_items)}条短语")
+        logger.info(f"向量数据库collection：{self.collection_name}初始数据插入完成，共 {all_items_count}条短语")
 
     def _log_sync_stats(self, existing_count: int, deleted_count: int, inserted_count: int, final_count: int):
         """Log sync statistics."""

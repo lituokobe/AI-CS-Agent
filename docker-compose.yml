@@ -22,7 +22,9 @@ services:
       # Dev - if milvus, redis and embedding are deployed on the same machine:
       - MILVUS_URL=http://host.docker.internal:19530
       - REDIS_SERVER=host.docker.internal
-      - EMBED_SERVICE_URL=http://host.docker.internal:8083
+      - EMBED_SERVICE_URL=http://host.docker.internal
+      - EMBED_SERVICE_PORT1 =8083
+      - EMBED_SERVICE_PORT2 =8085
     cap_drop:
       - ALL # Remove ALL special root privileges from the container, even if it runs as root.
     cap_add:
@@ -78,7 +80,9 @@ services:
       # Prod - milvus, redis and embedding are deployed on another machine (internal IP):
       - MILVUS_URL=http://172.29.121.236:19530
       - REDIS_SERVER=172.29.121.236
-      - EMBED_SERVICE_URL=http://172.29.121.236:8083
+      - EMBED_SERVICE_URL=http://172.29.121.236
+      - EMBED_SERVICE_PORT1 =8083
+      - EMBED_SERVICE_PORT2 =8085
     cap_drop:
       - ALL
     security_opt:

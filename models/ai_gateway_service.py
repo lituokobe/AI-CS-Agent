@@ -23,6 +23,8 @@ logger = setup_logger('ai_gateway', category='gateway', console_output=True)
 # 服务配置
 #Get model service url from env first (for Docker), if not, get from settings
 AI_MODEL_SERVICE_URL = os.getenv("AI_MODEL_SERVICE_URL", settings.AI_MODEL_SERVICE_URL)
+# PHP回调地址：当gateway侧检测到激活失败/超时时，作为兜底通知PHP（ai_service侧也可能通知，重复sleep幂等无害）
+PHP_CALLBACK_URL = os.getenv("PHP_CALLBACK_URL", settings.PHP_CALLBACK_URL)
 GATEWAY_VERSION = "1.0.0"
 
 # Redis连接
@@ -110,40 +112,93 @@ class GatewayManager:
 gateway_manager = GatewayManager()
 
 
-def async_initialize_model(model_id, config_data, expire_time):
-    """异步初始化模型"""
+def _notify_php_activation_failed(model_id, error_msg):
+    """gateway侧兜底回调：通知PHP模型激活失败/超时，回退到sleep状态。
+    ai_service侧在异常时也会回调，但若ai_service协程被取消(CancelledError)或卡死，
+    其回调不会触发，因此gateway必须在感知到失败/超时时兜底通知。重复发送sleep幂等无害。
+    """
+    try:
+        payload = {
+            'model_id': model_id,
+            'status': 'sleep',  # 回退到休眠状态，让前端从"激活中"退出
+            'timestamp': datetime.now().isoformat(),
+            'reason': f'gateway_activation_failed: {error_msg}'
+        }
+        # 异步线程发送，避免阻塞
+        thread = threading.Thread(
+            target=lambda: requests.post(PHP_CALLBACK_URL, json=payload, timeout=5),
+            daemon=True
+        )
+        thread.start()
+        logger.info(f"📤 gateway兜底通知PHP激活失败: {model_id}, 原因: {error_msg}")
+    except Exception as e:
+        logger.error(f"❌ gateway兜底通知PHP激活失败失败: {model_id}, {str(e)}")
 
-    def initialize_task():
-        try:
-            payload = {
+
+def enqueue_initialize_model(model_id, config_data, expire_time):
+    """同步向 ai_service 提交激活入队，立即拿到排队信息返回给 PHP/前端。
+    真正的激活在 ai_service 后台串行执行，不再在 gateway 侧等待 600s。
+    """
+    try:
+        payload = {
+            'model_id': model_id,
+            'config': config_data or {},
+            'expire_time': expire_time
+        }
+        logger.info(f"🔄 提交模型激活入队: {model_id}")
+        response = requests.post(
+            f"{AI_MODEL_SERVICE_URL}/model/initialize",
+            json=payload,
+            timeout=30  # 入队接口应秒回
+        )
+        if response.status_code == 200:
+            result = response.json()
+            if result.get('success'):
+                logger.info(
+                    f"✅ 模型入队成功: {model_id}, "
+                    f"位次={result.get('queue_position')}, 前方={result.get('waiting_count')}"
+                )
+                return {
+                    'success': True,
+                    'message': result.get('message', f'模型 {model_id} 已提交激活'),
+                    'model_id': model_id,
+                    'queued': result.get('queued', True),
+                    'queue_position': result.get('queue_position', 0),
+                    'waiting_count': result.get('waiting_count', 0),
+                    'status': result.get('status', 'queued'),
+                    'already_active': result.get('already_active', False),
+                    'async': True,
+                }
+            logger.error(f"❌ 模型入队业务失败: {model_id}, 错误: {result.get('message')}")
+            _notify_php_activation_failed(model_id, f"业务失败: {result.get('message')}")
+            return {
+                'success': False,
+                'message': result.get('message', f'模型 {model_id} 入队失败'),
                 'model_id': model_id,
-                'config': config_data or {},
-                'expire_time': expire_time
             }
-
-            logger.info(f"🔄 开始异步初始化模型: {model_id}")
-            response = requests.post(
-                f"{AI_MODEL_SERVICE_URL}/model/initialize",
-                json=payload,
-                timeout=600  # 初始化可能较慢
-            )
-
-            if response.status_code == 200:
-                result = response.json()
-                if result['success']:
-                    logger.info(f"✅ 异步模型初始化成功: {model_id}")
-                else:
-                    logger.error(f"❌ 异步模型初始化失败: {model_id}, 错误: {result.get('message')}")
-            else:
-                logger.error(f"❌ 异步模型初始化HTTP错误: {model_id}, 状态码: {response.status_code}")
-
-        except Exception as e:
-            logger.error(f"🚨 异步模型初始化异常: {model_id}, 错误: {str(e)}")
-
-    # 启动异步线程
-    thread = threading.Thread(target=initialize_task, daemon=True, name=f"AsyncInit-{model_id}")
-    thread.start()
-    logger.info(f"🚀 提交异步模型初始化任务: {model_id}")
+        logger.error(f"❌ 模型入队HTTP错误: {model_id}, 状态码: {response.status_code}")
+        _notify_php_activation_failed(model_id, f"HTTP错误: {response.status_code}")
+        return {
+            'success': False,
+            'message': f'模型 {model_id} 入队HTTP错误: {response.status_code}',
+            'model_id': model_id,
+        }
+    except requests.exceptions.RequestException as e:
+        logger.error(f"🚨 模型入队连接异常: {model_id}, 错误: {str(e)}")
+        _notify_php_activation_failed(model_id, f"连接异常: {str(e)}")
+        return {
+            'success': False,
+            'message': f'模型入队连接异常: {str(e)}',
+            'model_id': model_id,
+        }
+    except Exception as e:
+        logger.error(f"🚨 模型入队异常: {model_id}, 错误: {str(e)}")
+        _notify_php_activation_failed(model_id, f"未知异常: {str(e)}")
+        return {
+            'success': False,
+            'message': f'模型入队异常: {str(e)}',
+            'model_id': model_id,
+        }
 
 
 def call_model_service(model_id, backstop_model, user_input, call_id, task_id):
@@ -844,14 +899,10 @@ def start_model():
                 'message': f'模型延期请求失败: {str(e)}'
             }), 500
     else:
-        # 完整初始化模式 - 异步处理
-        async_initialize_model(model_id, config_data, expire_time)
-        return jsonify({
-            'success': True,
-            'message': f'模型 {model_id} 初始化请求已提交，正在后台处理',
-            'model_id': model_id,
-            'async': True
-        })
+        # 完整初始化模式 - 入队后立即返回排队信息（真正激活在 ai_service 后台串行）
+        result = enqueue_initialize_model(model_id, config_data, expire_time)
+        status_code = 200 if result.get('success') else 500
+        return jsonify(result), status_code
 
 # 其他接口保持不变...
 @app.route('/gateway/conversation', methods=['POST'])

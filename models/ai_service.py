@@ -75,6 +75,15 @@ class DynamicModelManager:
         self._init_versions: dict[str, int] = {}
         self._init_locks: dict[str, asyncio.Lock] = {}
 
+        # 🎯 激活队列：全局串行，同一时间只跑 1 个真正的 initialize
+        self._activation_job_queue: asyncio.Queue | None = None
+        self._pending_jobs: dict[str, dict] = {}  # model_id -> job
+        self._queue_order: list[str] = []  # 等待中的 model_id 顺序（不含正在跑的）
+        self._current_job_model_id: str | None = None
+        self._queue_async_lock = None  # asyncio.Lock，在事件循环内懒创建
+        # again / 作废入队后递增，worker 跳过 Queue 里残留的旧 job
+        self._activation_gen: dict[str, int] = {}
+
     def start_cleanup_task(self):
         """启动后台清理线程"""
         async def cleanup_worker():
@@ -96,6 +105,200 @@ class DynamicModelManager:
 
         asyncio.create_task(cleanup_worker())
 
+    def start_activation_queue_worker(self):
+        """启动激活队列 worker：同一时间只执行一个 initialize_model"""
+        if self._activation_job_queue is not None:
+            return
+        self._activation_job_queue = asyncio.Queue()
+        self._queue_async_lock = asyncio.Lock()
+
+        async def activation_worker():
+            logger.info("🚀 激活队列 worker 已启动（并发=1）")
+            while True:
+                job = await self._activation_job_queue.get()
+                model_id = job['model_id']
+                should_run = False
+                waiting_count = 0
+                try:
+                    # 与 enqueue 共用锁，避免位次/通知竞态
+                    async with self._queue_async_lock:
+                        # again 后 Queue 里可能残留旧 job，按 generation 丢弃
+                        if job.get('gen', 0) != self._activation_gen.get(model_id, 0):
+                            logger.info(f"⏭️ 跳过已作废的排队激活: {model_id} (gen={job.get('gen')})")
+                        else:
+                            should_run = True
+                            self._current_job_model_id = model_id
+                            if model_id in self._queue_order:
+                                self._queue_order.remove(model_id)
+                            self._pending_jobs.pop(model_id, None)
+
+                            waiting_count = len(self._queue_order)
+                            message = (
+                                f"轮到您了，正在激活模型（后方还有 {waiting_count} 个等待）"
+                                if waiting_count else "轮到您了，正在激活模型"
+                            )
+                            self._notify_php_model_activating(
+                                model_id,
+                                reason=message,
+                                queue_position=1,
+                                waiting_count=0,
+                                message=message,
+                            )
+                            self._broadcast_queue_positions()
+
+                    if not should_run:
+                        continue
+
+                    logger.info(f"🔄 队列开始执行激活: {model_id}，后方等待 {waiting_count}")
+                    await self.initialize_model(
+                        model_id,
+                        job.get('config_data'),
+                        job.get('task_id'),
+                        job.get('expire_time'),
+                    )
+                except asyncio.CancelledError:
+                    # initialize_model 已回调 PHP；不可让 CancelledError 杀死 worker，否则整队永久卡住
+                    logger.warning(f"⚠️ 队列激活被取消: {model_id}，worker 继续消费后续任务")
+                except Exception as e:
+                    logger.error(f"❌ 队列激活失败 {model_id}: {str(e)}")
+                finally:
+                    async with self._queue_async_lock:
+                        if self._current_job_model_id == model_id:
+                            self._current_job_model_id = None
+                        if should_run:
+                            self._broadcast_queue_positions()
+                    self._activation_job_queue.task_done()
+
+        asyncio.create_task(activation_worker())
+
+    def _get_queue_snapshot(self, model_id: str) -> tuple[int, int]:
+        """返回 (queue_position, waiting_count)。position 从 1 起；waiting_count=前方人数。"""
+        if self._current_job_model_id == model_id:
+            return 1, 0
+        try:
+            idx = self._queue_order.index(model_id)
+        except ValueError:
+            return 0, 0
+        # 有正在跑的任务时，队列第 0 个排第 2
+        offset = 1 if self._current_job_model_id else 0
+        position = idx + 1 + offset
+        return position, position - 1
+
+    @staticmethod
+    def _queue_message(position: int, waiting_count: int, status: str = 'queued') -> str:
+        if status == 'activating':
+            return "正在激活模型，请稍候"
+        if waiting_count <= 0:
+            return "已排队，即将开始激活"
+        return f"前方还有 {waiting_count} 个模型在排队，您排第 {position} 位"
+
+    def _broadcast_queue_positions(self):
+        """前方任务变化后，通知仍在排队的模型更新位次"""
+        for mid in list(self._queue_order):
+            position, waiting_count = self._get_queue_snapshot(mid)
+            if position <= 0:
+                continue
+            message = self._queue_message(position, waiting_count, 'queued')
+            self._notify_php_model_queued(mid, position, waiting_count, message)
+
+    async def enqueue_initialize(self, model_id, config_data=None, task_id=None, expire_time=None) -> dict:
+        """
+        将激活请求入队，立即返回排队信息。
+        同一 model_id 已在队列或正在激活时不重复入队，直接返回当前位次。
+        """
+        # 懒启动：防止 before_serving 未触发时队列不可用
+        if self._activation_job_queue is None or self._queue_async_lock is None:
+            with self.lock:
+                if self._activation_job_queue is None or self._queue_async_lock is None:
+                    self.start_activation_queue_worker()
+
+        async with self._queue_async_lock:
+            # 已激活成功（含服务重启恢复的 recovered）：直接延期/复用
+            with self.lock:
+                existing = self.models.get(model_id)
+                if (
+                    existing
+                    and 'instance' in existing
+                    and existing.get('status') in ('active', 'recovered')
+                ):
+                    if expire_time:
+                        existing['expire_time'] = expire_time
+                    if task_id:
+                        self.model_tasks[model_id].add(task_id)
+                        self.model_usage[model_id] = self.model_usage.get(model_id, 0) + 1
+                    self._notify_php_model_activated(model_id)
+                    return {
+                        'success': True,
+                        'queued': False,
+                        'already_active': True,
+                        'queue_position': 0,
+                        'waiting_count': 0,
+                        'message': f'模型 {model_id} 已激活',
+                        'model_id': model_id,
+                        'status': 'activated',
+                    }
+
+            # 正在执行该模型
+            if self._current_job_model_id == model_id:
+                message = self._queue_message(1, 0, 'activating')
+                return {
+                    'success': True,
+                    'queued': True,
+                    'queue_position': 1,
+                    'waiting_count': 0,
+                    'message': message,
+                    'model_id': model_id,
+                    'status': 'activating',
+                }
+
+            # 已在等待队列：更新配置，返回当前位次
+            if model_id in self._pending_jobs:
+                job = self._pending_jobs[model_id]
+                job['config_data'] = config_data or job.get('config_data')
+                job['task_id'] = task_id if task_id is not None else job.get('task_id')
+                job['expire_time'] = expire_time if expire_time is not None else job.get('expire_time')
+                position, waiting_count = self._get_queue_snapshot(model_id)
+                message = self._queue_message(position, waiting_count, 'queued')
+                self._notify_php_model_queued(model_id, position, waiting_count, message)
+                return {
+                    'success': True,
+                    'queued': True,
+                    'queue_position': position,
+                    'waiting_count': waiting_count,
+                    'message': message,
+                    'model_id': model_id,
+                    'status': 'queued',
+                }
+
+            # 新入队
+            job = {
+                'model_id': model_id,
+                'config_data': config_data or {},
+                'task_id': task_id,
+                'expire_time': expire_time,
+                'gen': self._activation_gen.get(model_id, 0),
+            }
+            self._pending_jobs[model_id] = job
+            self._queue_order.append(model_id)
+            # 锁内用 put_nowait，避免 await 让出执行权导致竞态
+            self._activation_job_queue.put_nowait(job)
+
+            position, waiting_count = self._get_queue_snapshot(model_id)
+            message = self._queue_message(position, waiting_count, 'queued')
+            # 队首且当前无人在跑：worker 马上会发 activating，跳过 queued 回调避免文案闪一下又被覆盖
+            if not (position == 1 and self._current_job_model_id is None):
+                self._notify_php_model_queued(model_id, position, waiting_count, message)
+            logger.info(f"📥 模型入队: {model_id}, 位次={position}, 前方等待={waiting_count}")
+            return {
+                'success': True,
+                'queued': True,
+                'queue_position': position,
+                'waiting_count': waiting_count,
+                'message': message,
+                'model_id': model_id,
+                'status': 'queued',
+            }
+
     @staticmethod
     def _notify_php_model_activated(model_id):
         """异步通知PHP模型激活"""
@@ -105,7 +308,6 @@ class DynamicModelManager:
                 'status': 'activated',
                 'timestamp': datetime.now().isoformat()
             }
-            # 使用异步线程
             thread = threading.Thread(
                 target=lambda: requests.post(f"{PHP_CALLBACK_URL}", json=payload, timeout=3),
                 daemon=True
@@ -117,7 +319,7 @@ class DynamicModelManager:
 
     @staticmethod
     def _notify_php_model_activation_failed(model_id, error_msg):
-        """通知PHP模型激活失败"""
+        """通知PHP模型激活失败（异步，不阻塞激活队列）"""
         try:
             payload = {
                 'model_id': model_id,
@@ -125,7 +327,6 @@ class DynamicModelManager:
                 'timestamp': datetime.now().isoformat(),
                 'reason': f'activation_failed: {error_msg}'
             }
-            # 使用异步线程发送通知
             thread = threading.Thread(
                 target=lambda: requests.post(f"{PHP_CALLBACK_URL}", json=payload, timeout=3),
                 daemon=True
@@ -171,22 +372,45 @@ class DynamicModelManager:
             logger.error(f"❌ 异步通知PHP暂停任务失败: {str(e)}")
 
     @staticmethod
-    def _notify_php_model_activating(model_id, reason):
-        """异步通知PHP模型激活"""
+    def _notify_php_model_queued(model_id, queue_position, waiting_count, message):
+        """通知PHP模型已入队/位次更新"""
         try:
             payload = {
                 'model_id': model_id,
-                'status': 'activating',
-                'reason': reason,
-                'timestamp': datetime.now().isoformat()
+                'status': 'queued',
+                'queue_position': queue_position,
+                'waiting_count': waiting_count,
+                'message': message,
+                'timestamp': datetime.now().isoformat(),
             }
-            # 使用异步线程
             thread = threading.Thread(
                 target=lambda: requests.post(f"{PHP_CALLBACK_URL}", json=payload, timeout=3),
                 daemon=True
             )
             thread.start()
-            logger.info(f"📤 异步通知PHP模型激活: {model_id}")
+            logger.info(f"📤 通知PHP模型排队: {model_id}, 位次={queue_position}, 前方={waiting_count}")
+        except Exception as e:
+            logger.error(f"❌ 通知PHP模型排队失败: {str(e)}")
+
+    @staticmethod
+    def _notify_php_model_activating(model_id, reason, queue_position=1, waiting_count=0, message=None):
+        """异步通知PHP模型正在激活（已出队开始执行）"""
+        try:
+            payload = {
+                'model_id': model_id,
+                'status': 'activating',
+                'reason': reason,
+                'queue_position': queue_position,
+                'waiting_count': waiting_count,
+                'message': message or reason,
+                'timestamp': datetime.now().isoformat()
+            }
+            thread = threading.Thread(
+                target=lambda: requests.post(f"{PHP_CALLBACK_URL}", json=payload, timeout=3),
+                daemon=True
+            )
+            thread.start()
+            logger.info(f"📤 异步通知PHP模型激活中: {model_id}")
         except Exception as e:
             logger.error(f"❌ 异步通知PHP模型激活失败: {str(e)}")
 
@@ -451,6 +675,26 @@ class DynamicModelManager:
             # --------------------------------------------------------
             # 🎯 STEP 6: Error Handling & Cleanup
             # --------------------------------------------------------
+            except asyncio.CancelledError:
+                # 协程被取消（通常是gateway读超时后断开连接，Hypercorn取消本协程）。
+                # CancelledError继承自BaseException，不会被下面的except Exception捕获，
+                # 若不在此回调PHP，前端将永远卡在"激活中"。
+                logger.warning(f"模型 {model_id} 初始化被取消(v{current_version})，回调PHP激活失败")
+                for client in [milvus_client, redis_client]:
+                    if client:
+                        try:
+                            await self._safe_close_client(client)
+                            logger.debug(f"🧹 模型 {model_id} 取消清理 {type(client).__name__}")
+                        except Exception as cleanup_err:
+                            logger.warning(f"⚠️ 模型 {model_id} 取消清理客户端失败: {cleanup_err}")
+                await self._cleanup_partial_init(model_id)
+                with self.lock:
+                    self.model_usage.pop(model_id, None)
+                    self.model_last_used.pop(model_id, None)
+                    self.model_tasks.pop(model_id, None)
+                    self.model_created_time.pop(model_id, None)
+                self._notify_php_model_activation_failed(model_id, "初始化被取消(客户端断开/超时)")
+                raise
             except Exception as e:
                 logger.error(f"模型 {model_id} 动态初始化失败(v{current_version}): {str(e)}")
                 # 🎯 CRITICAL: Clean up local client variables that may have been created
@@ -504,6 +748,14 @@ class DynamicModelManager:
         """获取模型实例，更新使用时间"""
         with self.lock:
             if model_id in self.models:
+                model_data = self.models[model_id]
+
+                # 🎯 跳过initializing模型：尚未构建完成，没有instance键，
+                # 直接访问会KeyError；返回None让上层走兜底模型逻辑
+                if model_data.get('status') == 'initializing':
+                    logger.info(f"模型 {model_id} 正在初始化中，暂不可用")
+                    return None
+
                 # 检查模型是否过期
                 if self._check_model_expired(model_id):
                     logger.warning(f"模型 {model_id} 已过期")
@@ -550,64 +802,66 @@ class DynamicModelManager:
 
     async def destroy_model(self, model_id, force=False):
         """销毁模型实例"""
+        # Step 1: 锁内检查并立即移除模型，避免await期间get_model返回正在关闭的实例
         with self.lock:
             if model_id not in self.models:
                 return True
 
             # 检查是否还有任务在使用
-            if not force and self.model_usage[model_id] > 0:
+            if not force and self.model_usage.get(model_id, 0) > 0:
                 logger.warning(f"模型 {model_id} 仍有 {self.model_usage[model_id]} 个任务在使用，无法销毁")
                 return False
 
+            model_data = self.models.pop(model_id)  # 立即移除，get_model此后返回None
+            milvus_client = model_data.get('milvus_client')
+            redis_client = model_data.get('redis_client')
+
+            # 同步清理追踪字典（与原逻辑一致，不涉及await）
+            if model_id in self.model_usage:
+                del self.model_usage[model_id]
+            if model_id in self.model_last_used:
+                del self.model_last_used[model_id]
+            if model_id in self.model_tasks:
+                del self.model_tasks[model_id]
+            self._init_versions.pop(model_id, None)
+            self._init_locks.pop(model_id, None)
+
+        # Step 2: 锁外await关闭客户端，不阻塞其他协程，避免持锁await的竞态
+        if milvus_client:
             try:
-                # 清理模型资源
-                model_data = self.models[model_id]
-                milvus_client = model_data.get('milvus_client')
-                redis_client = model_data.get('redis_client')
-                # Close Milvus
-                if milvus_client:
-                    try:
-                        await self._safe_close_client(milvus_client)
-                        logger.info(f"✅ Milvus client closed for model {model_id}")
-                    except Exception as e:
-                        logger.error(f"❌ Failed to close Milvus client for {model_id}: {e}")
-
-                # Close Redis
-                if redis_client:
-                    try:
-                        await self._safe_close_client(redis_client)
-                        logger.info(f"✅ Redis client closed for model {model_id}")
-                    except Exception as e:
-                        logger.error(f"❌ Failed to close Redis client for {model_id}: {e}")
-
-                # 从管理器中移除
-                del self.models[model_id]
-                if model_id in self.model_usage:
-                    del self.model_usage[model_id]
-                if model_id in self.model_last_used:
-                    del self.model_last_used[model_id]
-                if model_id in self.model_tasks:
-                    del self.model_tasks[model_id]
-
-                # 🎯 删除持久化配置（会自动清理旧备份）
-                self.persistence_manager.delete_model_config(model_id)
-
-                logger.info(f"模型 {model_id} 已销毁，剩余模型数: {len(self.models)}")
-
-                # 通知PHP模型休眠
-                self._notify_php_model_sleep(model_id)
-
-                self._init_versions.pop(model_id, None)
-                self._init_locks.pop(model_id, None)
-
-                return True
-
+                await self._safe_close_client(milvus_client)
+                logger.info(f"✅ Milvus client closed for model {model_id}")
             except Exception as e:
-                logger.error(f"销毁模型 {model_id} 失败: {str(e)}")
-                return False
+                logger.error(f"❌ Failed to close Milvus client for {model_id}: {e}")
+        if redis_client:
+            try:
+                await self._safe_close_client(redis_client)
+                logger.info(f"✅ Redis client closed for model {model_id}")
+            except Exception as e:
+                logger.error(f"❌ Failed to close Redis client for {model_id}: {e}")
+
+        # Step 3: 持久化删除与PHP回调（同步操作，无需持锁）
+        try:
+            self.persistence_manager.delete_model_config(model_id)
+            logger.info(f"模型 {model_id} 已销毁，剩余模型数: {len(self.models)}")
+            # 通知PHP模型休眠
+            self._notify_php_model_sleep(model_id)
+            return True
+        except Exception as e:
+            logger.error(f"销毁模型 {model_id} 失败: {str(e)}")
+            return False
 
     async def again_model(self, model_id):
-        """重启模型实例"""
+        """重启模型实例：作废排队中的旧任务，再销毁内存实例"""
+        # 作废 Queue 中残留 job，避免 again 后仍用旧配置激活
+        if self._queue_async_lock is not None:
+            async with self._queue_async_lock:
+                self._activation_gen[model_id] = self._activation_gen.get(model_id, 0) + 1
+                self._pending_jobs.pop(model_id, None)
+                if model_id in self._queue_order:
+                    self._queue_order.remove(model_id)
+                self._broadcast_queue_positions()
+
         # 🎯 Step 1: Extract model data under lock (minimize lock hold time)
         with self.lock:
             if model_id not in self.models:
@@ -658,11 +912,15 @@ class DynamicModelManager:
             current_memory = self._get_memory_usage()
             total_models = len(self.models)
 
-            # 🎯 收集统计信息
+            # 🎯 收集统计信息（跳过initializing状态的模型，其追踪字典尚未填充，直接访问会KeyError）
+            active_models = [m for m in self.models
+                             if self.models[m].get('status') != 'initializing' and self.model_usage.get(m, 0) > 0]
+            idle_models_list = [m for m in self.models
+                                if self.models[m].get('status') != 'initializing' and self.model_usage.get(m, 0) == 0]
             stats = {
                 'total_models': total_models,
-                'active_models': len([m for m in self.models if self.model_usage[m] > 0]),
-                'idle_models': len([m for m in self.models if self.model_usage[m] == 0]),
+                'active_models': len(active_models),
+                'idle_models': len(idle_models_list),
                 'current_memory_mb': current_memory,
                 'max_memory_mb': self.max_memory_mb,
                 'max_models': self.max_models,
@@ -676,10 +934,13 @@ class DynamicModelManager:
             # 🎯 按创建时间排序的空闲模型列表（最老的在前）
             idle_models = []
             for model_id in self.models:
-                if self.model_usage[model_id] == 0:  # 只考虑空闲模型
-                    idle_time = (current_time - self.model_last_used[model_id]).total_seconds()
-                    created_time = self.model_created_time[model_id]
-                    model_data = self.models[model_id]
+                model_data = self.models[model_id]
+                # 🎯 跳过initializing模型：追踪字典未填充，且不应被清理
+                if model_data.get('status') == 'initializing':
+                    continue
+                if self.model_usage.get(model_id, 0) == 0:  # 只考虑空闲模型
+                    idle_time = (current_time - self.model_last_used.get(model_id, current_time)).total_seconds()
+                    created_time = self.model_created_time.get(model_id, current_time)
 
                     # 🎯 检查是否绝对过期
                     expired = current_timestamp > model_data['expire_time']
@@ -688,7 +949,7 @@ class DynamicModelManager:
                         'model_id': model_id,
                         'created_time': created_time,
                         'idle_time': idle_time,
-                        'last_used': self.model_last_used[model_id],
+                        'last_used': self.model_last_used.get(model_id, current_time),
                         'expired': expired,  # 🎯 新增：是否已过期
                         'expire_time': model_data['expire_time'],
                         'expire_in_hours': max(0, (model_data['expire_time'] - current_timestamp) / 3600)
@@ -1020,6 +1281,7 @@ def get_detailed_error():
 async def startup():
     await model_manager.recover_models_on_startup()  # now awaited properly
     model_manager.start_cleanup_task() # clean work
+    model_manager.start_activation_queue_worker()  # 激活串行队列
 
 @app.route('/health', methods=['GET'])
 def health_check():
@@ -1049,7 +1311,7 @@ def health_check():
 
 @app.route('/model/initialize', methods=['POST'])
 async def initialize_model():
-    """初始化模型接口 - 动态创建"""
+    """初始化模型接口 - 入队后立即返回排队信息，真正激活由后台串行执行"""
     data = await request.get_json(silent=True)
     if not data:
         return jsonify({"error": "无效JSON"}), 400
@@ -1064,18 +1326,18 @@ async def initialize_model():
         }), 400
 
     try:
-        if await model_manager.initialize_model(model_id, config_data, task_id, expire_time):
-            return jsonify({
-                'success': True,
-                'message': f'模型 {model_id} 初始化成功',
-                'model_id': model_id,
-                'task_id': task_id
-            })
-        else:
-            return jsonify({
-                'success': False,
-                'message': f'模型 {model_id} 初始化失败'
-            }), 500
+        result = await model_manager.enqueue_initialize(model_id, config_data, task_id, expire_time)
+        return jsonify({
+            'success': result.get('success', True),
+            'message': result.get('message', f'模型 {model_id} 已提交激活'),
+            'model_id': model_id,
+            'task_id': task_id,
+            'queued': result.get('queued', True),
+            'queue_position': result.get('queue_position', 0),
+            'waiting_count': result.get('waiting_count', 0),
+            'status': result.get('status', 'queued'),
+            'already_active': result.get('already_active', False),
+        })
 
     except Exception as e:
         return jsonify({
@@ -1241,7 +1503,7 @@ async def destroy_model():
             'message': 'model_id 参数不能为空'
         }), 400
 
-    if model_manager.destroy_model(model_id, force):
+    if await model_manager.destroy_model(model_id, force):
         return jsonify({
             'success': True,
             'message': f'模型 {model_id} 销毁成功'
