@@ -4,7 +4,7 @@ from langchain_openai import ChatOpenAI
 ALI_BASE_URL= "https://dashscope.aliyuncs.com/compatible-mode/v1"
 ALI_API_KEY = ""
 
-DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1"
+DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 DEEPSEEK_API_KEY = ""
 
 qwen_turbo = ChatOpenAI(
@@ -41,7 +41,8 @@ deepseek_llm = ChatOpenAI(
     api_key = DEEPSEEK_API_KEY,
     base_url = DEEPSEEK_BASE_URL,
     max_tokens = 500,
-    model_kwargs={"response_format": {"type": "json_object"}}
+    model_kwargs={"response_format": {"type": "json_object"}},
+    extra_body={"thinking": {"type": "disabled"}}
 )
 
 local_llm = ChatOpenAI(
@@ -85,5 +86,5 @@ if __name__ == '__main__':
                      id='caccf4b0-6fd9-4a77-996f-ed809667dc4b'
                      )
     ]
-    response = deepseek_llm.invoke(test_messages)
+    response = qwen_flash.invoke(test_messages)
     print(response)
