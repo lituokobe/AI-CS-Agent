@@ -82,3 +82,4 @@ docs/_build/
 /chroma_db
 
 /config/db_setting.py
+/PROJECT_DETAILS.md

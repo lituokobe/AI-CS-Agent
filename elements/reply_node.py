@@ -666,7 +666,7 @@ class ReplyNodeKT:
         self.next_ = next_
         # self.master_process_id = master_process_id
         if self.action not in {0, 1, 3}:
-            e_m = f"知识库转换节点{self.config.node_id}-{self.config.node_name}执行动作无效"
+            e_m = f"知识库跳转节点{self.config.node_id}-{self.config.node_name}执行动作无效"
             logger.error(e_m)
             raise ValueError(e_m)
 

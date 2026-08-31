@@ -4,14 +4,14 @@ agent_data = {
   "intention_priority": 3,
 
   "use_llm": 1,
-  "llm_name": "deepseek_llm",#"local_llm" "deepseek_llm" "glm_llm", "qwen_llm",
+  "llm_name": "deepseek-chat",#"local_llm" "deepseek-chat" "glm_llm", "qwen_llm",
   "llm_threshold": 3,
   "llm_context_rounds": 2,
   "llm_role_description": "你是一个专业的家装平台的电话营销专员，你的任务是获取上海可能有装修意向的客户",
   "llm_background_info": "你现在正在沟通的都是可能会有装修需求的人，请尽量引导客户加微信",
 
   "vector_db_url": "http://127.0.0.1:19530",
-  "collection_name" : "home_reno123"
+  "collection_name" : "home_reno1235"
 }
 chatflow_design = [
   {

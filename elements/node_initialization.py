@@ -116,7 +116,7 @@ def create_transfer_node(
 
     # Identify the next node
     if action not in {1,2,3}:
-        e_m = f"转换节点{node_id}-{node_name}执行动作无效"
+        e_m = f"跳转节点{node_id}-{node_name}执行动作无效"
         logger.error(e_m)
         raise ValueError(e_m)
     if action == 1: # 挂断
@@ -153,7 +153,7 @@ def create_transfer_node(
     graph.add_edge(reply_node_name, transfer_node_id)
 
     if enable_logging:
-        log_info = (f"转换节点创立 - 主流程ID：{main_flow_id} - 主流程名称：{main_flow_name} "
+        log_info = (f"跳转节点创立 - 主流程ID：{main_flow_id} - 主流程名称：{main_flow_name} "
                     f"- 节点ID：{node_id} - 节点名称：{node_name}")
         logger.info("系统消息：%s", log_info)
 
@@ -206,7 +206,7 @@ def create_knowledge_transfer_node(
     graph.add_node(reply_node_name, reply_node)
 
     if enable_logging:
-        log_info = (f"知识库转换节点创立 - 主流程ID：{main_flow_id} - 主流程名称：{main_flow_name} "
+        log_info = (f"知识库跳转节点创立 - 主流程ID：{main_flow_id} - 主流程名称：{main_flow_name} "
                     f"- 节点ID：{node_id} - 节点名称：{node_name}")
         logger.info("系统消息：%s", log_info)
 
